@@ -188,7 +188,7 @@ def get_all_subjects_concatenated_dataframe(model_name, data_type='fmri'):
         all_subjects_df = pd.concat([all_subjects_df, subject_df], ignore_index=True)
 
     # save as csv
-    all_subjects_df.to_csv("all_subjects_behavior_data_" + data_type + "_" + model_name + "_simulated.csv", index=False)
+    all_subjects_df.to_csv(CACHE_DIR + "all_subjects_behavior_data_" + data_type + "_" + model_name + "_simulated.csv", index=False)
     return all_subjects_df
     
 
@@ -205,10 +205,14 @@ if __name__ == "__main__":
     # subject_id = 10  # Replace with actual subject ID
     # df = behavior_df.get_subject_dataframe(subject_id)
 
-    model_name = "momentum_learn_alt_goal"
+    #model_name = "momentum_learn_alt_goal"
     #model_name = "momentum"
-    model_name = "prospective"
-    model_name = "td_persistence"
-    data_type = "fmri"
+    #model_name = "prospective"
+    #model_name = "td_persistence"
+    #model_name = "retrospective"
+    #model_name = "progress"
+    model_name = "resources"
+    model_name = "momentum_with_softmax"
+    data_type = "online"
     get_all_subjects_concatenated_dataframe(model_name, data_type)
 

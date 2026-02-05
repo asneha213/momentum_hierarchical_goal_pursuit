@@ -4,6 +4,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)) + "src/")
 from src.create_behavior_dataframe import *
 from src.create_model_parameter_df import *
 from src.datautils import *
+from src.measures import SubjectMeasure
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -88,6 +89,38 @@ class PlotMeasures:
         sns.despine()
         plt.tight_layout()
         plt.savefig(self.figure_dir + "/goal_selection_per_block_" + self.experiment + ".png", dpi=300, bbox_inches='tight')
+        plt.show()
+
+    def plot_goal_action_congruence_histogram(self, experiment=0):
+        """
+        Plot histogram of goal-action congruence across all participants.
+        Uses subject_measure.get_goal_action_congruence() per subject.
+        Red vertical line indicates the mean.
+        """
+        subject_ids = ACTIVE_SUBJECT_IDS_ONLINE if self.data_type == "online" else ACTIVE_SUBJECT_IDS
+        congruences = []
+        for subject_id in subject_ids:
+            try:
+                subject_measure = SubjectMeasure(subject_id=subject_id, experiment=experiment, data_type=self.data_type)
+                val = subject_measure.get_goal_action_congruence()
+                if np.isfinite(val):
+                    congruences.append(val)
+            except (ZeroDivisionError, KeyError):
+                continue
+        congruences = np.array(congruences)
+        if len(congruences) == 0:
+            raise ValueError("No valid goal-action congruence values across subjects.")
+        mean_congruence = np.mean(congruences)
+        plt.figure(figsize=(8, 5))
+        plt.hist(congruences, bins=min(20, max(5, len(np.unique(congruences)))), edgecolor="black", alpha=0.7, density=True)
+        plt.axvline(mean_congruence, color="red", linewidth=2, label=f"Mean = {mean_congruence:.3f}")
+        plt.xlabel("Goal-action congruence", fontsize=12)
+        plt.ylabel("Density", fontsize=12)
+        plt.title(f"Goal-action congruence across participants (Experiment {self.experiment})", fontsize=14)
+        plt.legend()
+        sns.despine()
+        plt.tight_layout()
+        plt.savefig(self.figure_dir + "/goal_action_congruence_histogram_" + self.experiment + ".png", dpi=300, bbox_inches="tight")
         plt.show()
 
     def plot_viable_goal_selection_high_low(self):
@@ -431,7 +464,7 @@ class PlotMeasures:
                                       If False, creates separate subplots for each goal.
         """
         if simulate:
-            behavior_dataframe_csv = f"all_subjects_behavior_data_{self.data_type}_{model_name}_simulated.csv"
+            behavior_dataframe_csv = CACHE_DIR + f"all_subjects_behavior_data_{self.data_type}_{model_name}_simulated.csv"
             self.df = pd.read_csv(behavior_dataframe_csv)
 
         goals = ['SH', 'BR', 'HO']
@@ -522,9 +555,9 @@ class PlotMeasures:
                 # For simulated data, we need to reconstruct subject-level data
                 # Get the original dataframe with subject_id
                 if self.data_type == "online":
-                    behavior_dataframe_csv = f"all_subjects_behavior_data_{self.data_type}_{model_name}_simulated.csv"
+                    behavior_dataframe_csv = CACHE_DIR + f"all_subjects_behavior_data_{self.data_type}_{model_name}_simulated.csv"
                 else:
-                    behavior_dataframe_csv = f"all_subjects_behavior_data_{self.data_type}_{model_name}_simulated.csv"
+                    behavior_dataframe_csv = CACHE_DIR + f"all_subjects_behavior_data_{self.data_type}_{model_name}_simulated.csv"
                 df_original = pd.read_csv(behavior_dataframe_csv)
             else:
                 df_original = self.df
@@ -1015,7 +1048,7 @@ class PlotMeasures:
         plt.show()
 
 
-    def plot_subgoal_selection_related_subgoal_progress(self, simulate=False, collapse_conditions=False, collapse_over_subgoals=False):
+    def plot_subgoal_selection_related_subgoal_progress(self, simulate=False, model_name="momentum_learn_alt_goal", collapse_conditions=False, collapse_over_subgoals=False):
         """
         Plot subgoal selection probability as a function of subgoal progress.
         Plots all possible subgoal progress combinations (G, M, C, S for each goal SH, BR, HO)
@@ -1029,7 +1062,8 @@ class PlotMeasures:
                                          If False, show separate subplots for each subgoal.
         """
         if simulate:
-            behavior_dataframe_csv = CACHE_DIR + "all_subjects_behavior_data_" + self.data_type + "_momentum_learn_alt_goal_simulated.csv"
+            #behavior_dataframe_csv = CACHE_DIR + "all_subjects_behavior_data_" + self.data_type + "_momentum_learn_alt_goal_simulated.csv"
+            behavior_dataframe_csv = CACHE_DIR + f"all_subjects_behavior_data_{self.data_type}_{model_name}_simulated.csv"
             self.df = pd.read_csv(behavior_dataframe_csv)
 
         # Define all possible subgoal progress variables to plot
@@ -4968,8 +5002,8 @@ class PlotMeasures:
                    linewidth=2)
         
         # Customize the plot
-        ax.set_xlabel('Progress level', fontsize=16, fontweight='bold')
-        ax.set_ylabel('Goal stay probability', fontsize=16, fontweight='bold')
+        ax.set_xlabel('Progress level', fontsize=18, fontweight='bold')
+        ax.set_ylabel('Goal stay probability', fontsize=18, fontweight='bold')
         ax.set_ylim(0, 1.0)
         
         # Center the bars by adjusting x-axis limits
@@ -4983,12 +5017,12 @@ class PlotMeasures:
         else:
             experiment = ""
         
-        ax.set_title(f'Goal Stay Probability: Experiment {experiment}', 
-                    fontsize=15, weight='bold')
+        ax.set_title(f'Pr(Goal Stay)', 
+                    fontsize=20, weight='bold')
         
         # Make tick labels bold
-        ax.tick_params(axis='x', labelsize=14)
-        ax.tick_params(axis='y', labelsize=14)
+        ax.tick_params(axis='x', labelsize=16)
+        ax.tick_params(axis='y', labelsize=16)
         for label in ax.get_xticklabels():
             label.set_weight('bold')
         for label in ax.get_yticklabels():
@@ -5075,6 +5109,7 @@ class PlotMeasures:
     def plot_stay_proportion_with_progress_subgoals(self):
         """
         Plot subgoal selection stay percentages based on subgoal progress levels.
+        Shows two subplots: raw subgoal stay and subgoal stay given goal stay.
         Divides subgoal progress into two blocks:
         - Low: [0, 0.5)
         - High: [0.5, 1.0]
@@ -5129,17 +5164,16 @@ class PlotMeasures:
             print("No valid data found for subgoal stay proportion analysis")
             return None
         
-        # Calculate stay proportion for each progress level (both goal and subgoal must stay)
-        results_data = []
         subjects = df_filtered['subject_id'].unique()
         
+        # Calculate raw subgoal stay (without conditioning on goal stay)
+        results_data_raw = []
         for progress_level in ['Low Progress (0-0.5)', 'High Progress (0.5-1.0)']:
             level_data = df_filtered[df_filtered['progress_level'] == progress_level]
             
             if len(level_data) == 0:
                 continue
             
-            # Calculate stay proportion for each subject at this progress level
             subject_proportions = []
             total_stayed_all_subjects = 0
             total_trials_all_subjects = 0
@@ -5148,18 +5182,16 @@ class PlotMeasures:
                 subject_level_data = level_data[level_data['subject_id'] == subject]
                 
                 if len(subject_level_data) > 0:
-                    # Calculate stay proportion for this subject (both goal and subgoal must stay)
-                    stayed = ((subject_level_data['goal_selected'] == subject_level_data['prev_goal']) &
-                             (subject_level_data['subgoal_selected'] == subject_level_data['prev_subgoal'])).sum()
+                    # Raw subgoal stay (not conditioned on goal stay)
+                    subgoal_stayed = (subject_level_data['subgoal_selected'] == subject_level_data['prev_subgoal']).sum()
                     total = len(subject_level_data)
-                    subject_stay_prop = stayed / total if total > 0 else np.nan
+                    subject_stay_prop = subgoal_stayed / total if total > 0 else np.nan
                     
                     if not np.isnan(subject_stay_prop):
                         subject_proportions.append(subject_stay_prop)
-                        total_stayed_all_subjects += stayed
+                        total_stayed_all_subjects += subgoal_stayed
                         total_trials_all_subjects += total
             
-            # Calculate mean stay proportion across subjects
             if len(subject_proportions) > 0:
                 mean_stay_proportion = np.mean(subject_proportions)
                 sem_stay_proportion = np.std(subject_proportions) / np.sqrt(len(subject_proportions))
@@ -5167,7 +5199,7 @@ class PlotMeasures:
                 mean_stay_proportion = np.nan
                 sem_stay_proportion = np.nan
             
-            results_data.append({
+            results_data_raw.append({
                 'progress_level': progress_level,
                 'stay_proportion': mean_stay_proportion,
                 'sem': sem_stay_proportion,
@@ -5177,49 +5209,102 @@ class PlotMeasures:
                 'subject_proportions': subject_proportions
             })
         
-        if not results_data:
+        # Calculate subgoal stay given goal stay (conditioned on goal stay)
+        results_data_conditional = []
+        for progress_level in ['Low Progress (0-0.5)', 'High Progress (0.5-1.0)']:
+            level_data = df_filtered[df_filtered['progress_level'] == progress_level]
+            
+            if len(level_data) == 0:
+                continue
+            
+            subject_proportions = []
+            total_stayed_all_subjects = 0
+            total_trials_all_subjects = 0
+            
+            for subject in subjects:
+                subject_level_data = level_data[level_data['subject_id'] == subject]
+                
+                if len(subject_level_data) > 0:
+                    # First, filter to only trials where goal stayed
+                    goal_stayed_data = subject_level_data[
+                        subject_level_data['goal_selected'] == subject_level_data['prev_goal']
+                    ]
+                    
+                    if len(goal_stayed_data) > 0:
+                        # Then check if subgoal stayed given that goal stayed
+                        subgoal_stayed = (goal_stayed_data['subgoal_selected'] == goal_stayed_data['prev_subgoal']).sum()
+                        total_goal_stays = len(goal_stayed_data)
+                        subject_stay_prop = subgoal_stayed / total_goal_stays if total_goal_stays > 0 else np.nan
+                        
+                        if not np.isnan(subject_stay_prop):
+                            subject_proportions.append(subject_stay_prop)
+                            total_stayed_all_subjects += subgoal_stayed
+                            total_trials_all_subjects += total_goal_stays
+            
+            if len(subject_proportions) > 0:
+                mean_stay_proportion = np.mean(subject_proportions)
+                sem_stay_proportion = np.std(subject_proportions) / np.sqrt(len(subject_proportions))
+            else:
+                mean_stay_proportion = np.nan
+                sem_stay_proportion = np.nan
+            
+            results_data_conditional.append({
+                'progress_level': progress_level,
+                'stay_proportion': mean_stay_proportion,
+                'sem': sem_stay_proportion,
+                'n_subjects': len(subject_proportions),
+                'stayed_count': total_stayed_all_subjects,
+                'total_count': total_trials_all_subjects,
+                'subject_proportions': subject_proportions
+            })
+        
+        if not results_data_raw and not results_data_conditional:
             print("No valid data found for subgoal stay proportion analysis")
             return None
         
-        # Convert to DataFrame
-        results_df = pd.DataFrame(results_data)
+        # Convert to DataFrames
+        results_df_raw = pd.DataFrame(results_data_raw) if results_data_raw else pd.DataFrame()
+        results_df_conditional = pd.DataFrame(results_data_conditional) if results_data_conditional else pd.DataFrame()
         
-        # Print summary
-        print("\nSubgoal stay proportion by progress level (both goal and subgoal must stay):")
-        for _, row in results_df.iterrows():
+        # Print summaries
+        print("\nRaw subgoal stay proportion by progress level:")
+        for _, row in results_df_raw.iterrows():
             print(f"{row['progress_level']}: "
                   f"{row['stay_proportion']:.3f} ({row['stayed_count']}/{row['total_count']})")
         
-        # Create the plot
-        plt.figure(figsize=(7, 6))
+        print("\nSubgoal stay proportion by progress level (conditioned on goal stay):")
+        for _, row in results_df_conditional.iterrows():
+            print(f"{row['progress_level']}: "
+                  f"{row['stay_proportion']:.3f} ({row['stayed_count']}/{row['total_count']})")
         
-        # Create bar plot with progress levels on x-axis
-        ax = sns.barplot(
-            data=results_df,
-            x='progress_level',
-            y='stay_proportion',
-            palette=['#D3D3D3', '#696969'],  # Light gray for low, dark gray for high
-            edgecolor='black',
-            width=0.4
-        )
+        # Create the plot with two subplots
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
         
-        # Add error bars (standard error of the mean)
-        x_positions = range(len(results_df))
-        ax.errorbar(x_positions, results_df['stay_proportion'], 
-                   yerr=results_df['sem'], 
-                   fmt='none', 
-                   color='black', 
-                   capsize=5, 
-                   capthick=2, 
-                   linewidth=2)
+        # Left plot: Raw subgoal stay
+        if len(results_df_raw) > 0:
+            sns.barplot(
+                data=results_df_raw,
+                x='progress_level',
+                y='stay_proportion',
+                palette=['#D3D3D3', '#696969'],
+                edgecolor='black',
+                width=0.4,
+                ax=ax1
+            )
+            
+            x_positions = range(len(results_df_raw))
+            ax1.errorbar(x_positions, results_df_raw['stay_proportion'], 
+                       yerr=results_df_raw['sem'], 
+                       fmt='none', 
+                       color='black', 
+                       capsize=5, 
+                       capthick=2, 
+                       linewidth=2)
         
-        # Customize the plot
-        ax.set_xlabel('Subgoal progress level', fontsize=15, fontweight='bold')
-        ax.set_ylabel('Subgoal stay probability', fontsize=15, fontweight='bold')
-        ax.set_ylim(0, 1.0)
-        
-        # Center the bars by adjusting x-axis limits
-        ax.set_xlim(-0.4, 1.4)
+        ax1.set_xlabel('Subgoal progress level', fontsize=18, fontweight='bold')
+        ax1.set_ylabel('Subgoal stay probability', fontsize=18, fontweight='bold')
+        ax1.set_ylim(0, 1.0)
+        ax1.set_xlim(-0.4, 1.4)
         
         # Determine experiment number
         if self.data_type == "online":
@@ -5229,29 +5314,64 @@ class PlotMeasures:
         else:
             experiment = ""
         
-        ax.set_title(f'Subgoal Stay Probability: Experiment {experiment}', 
-                    fontsize=15, weight='bold')
+        ax1.set_title(f'Pr(Subgoal Stay)', 
+                    fontsize=20, weight='bold')
         
-        # Make tick labels bold
-        ax.tick_params(axis='x', labelsize=14)
-        ax.tick_params(axis='y', labelsize=14)
-        for label in ax.get_xticklabels():
+        # Make tick labels bold for ax1
+        ax1.tick_params(axis='x', labelsize=16)
+        ax1.tick_params(axis='y', labelsize=16)
+        for label in ax1.get_xticklabels():
             label.set_weight('bold')
-        for label in ax.get_yticklabels():
+        for label in ax1.get_yticklabels():
+            label.set_weight('bold')
+        
+        # Right plot: Subgoal stay given goal stay
+        if len(results_df_conditional) > 0:
+            sns.barplot(
+                data=results_df_conditional,
+                x='progress_level',
+                y='stay_proportion',
+                palette=['#D3D3D3', '#696969'],
+                edgecolor='black',
+                width=0.4,
+                ax=ax2
+            )
+            
+            x_positions = range(len(results_df_conditional))
+            ax2.errorbar(x_positions, results_df_conditional['stay_proportion'], 
+                       yerr=results_df_conditional['sem'], 
+                       fmt='none', 
+                       color='black', 
+                       capsize=5, 
+                       capthick=2, 
+                       linewidth=2)
+        
+        ax2.set_xlabel('Subgoal progress level', fontsize=18, fontweight='bold')
+        ax2.set_ylabel('Subgoal stay probability', fontsize=18, fontweight='bold')
+        ax2.set_ylim(0, 1.0)
+        ax2.set_xlim(-0.4, 1.4)
+        ax2.set_title(f'Pr(Subgoal Stay | Goal Stay)', 
+                    fontsize=20, weight='bold')
+        
+        # Make tick labels bold for ax2
+        ax2.tick_params(axis='x', labelsize=16)
+        ax2.tick_params(axis='y', labelsize=16)
+        for label in ax2.get_xticklabels():
+            label.set_weight('bold')
+        for label in ax2.get_yticklabels():
             label.set_weight('bold')
         
         plt.tight_layout()
         
-        # Statistical analysis: compare low vs high progress
+        # Statistical analysis: compare low vs high progress for both
         from scipy import stats
         
-        print("\nStatistical comparison (Low vs High subgoal progress):")
-        if len(results_df) == 2:  # Both low and high present
-            low_row = results_df[results_df['progress_level'] == 'Low Progress (0-0.5)'].iloc[0]
-            high_row = results_df[results_df['progress_level'] == 'High Progress (0.5-1.0)'].iloc[0]
+        print("\nStatistical comparison - Raw subgoal stay (Low vs High subgoal progress):")
+        if len(results_df_raw) == 2:  # Both low and high present
+            low_row = results_df_raw[results_df_raw['progress_level'] == 'Low Progress (0-0.5)'].iloc[0]
+            high_row = results_df_raw[results_df_raw['progress_level'] == 'High Progress (0.5-1.0)'].iloc[0]
             
             # Chi-square test for difference in proportions
-            # Create contingency table: [stayed, switched] for each condition
             low_stayed = low_row['stayed_count']
             low_total = low_row['total_count']
             low_switched = low_total - low_stayed
@@ -5270,37 +5390,63 @@ class PlotMeasures:
                   f"High={high_row['stay_proportion']:.3f}, "
                   f"χ²={chi2:.3f}, p={p_value:.4f}")
             
-            # Add significance markers to the plot
-            if p_value < 0.05:
-                # Get bar heights for positioning the significance marker
-                bars = ax.patches  # Get all bar rectangles
+            # Add significance markers to ax1
+            if p_value < 0.05 and len(results_df_raw) > 0:
+                bars = ax1.patches
                 bar_heights = [bar.get_height() for bar in bars]
                 if len(bar_heights) >= 2:
                     max_height = max(bar_heights[0], bar_heights[1])
-                    # Position the bracket above the bars
                     bracket_height = max_height + 0.05
                     line_height = bracket_height + 0.02
-
-                    # Get the x positions of the bars
                     x0 = bars[0].get_x() + bars[0].get_width() / 2
                     x1 = bars[1].get_x() + bars[1].get_width() / 2
-
-                    # Draw the bracket
-                    ax.plot([x0, x0, x1, x1], [bracket_height, line_height, line_height, bracket_height], 
+                    ax1.plot([x0, x0, x1, x1], [bracket_height, line_height, line_height, bracket_height], 
                             'k-', linewidth=1.5)
-
-                    # Add significance marker
-                    if p_value < 0.001:
-                        sig_text = '***'
-                    elif p_value < 0.01:
-                        sig_text = '**'
-                    else:
-                        sig_text = '*'
-
-                    ax.text((x0 + x1) / 2, line_height + 0.01, sig_text, 
+                    sig_text = '***' if p_value < 0.001 else ('**' if p_value < 0.01 else '*')
+                    ax1.text((x0 + x1) / 2, line_height + 0.01, sig_text, 
                             ha='center', va='bottom', fontsize=16, fontweight='bold')
-                else:
-                    print("Warning: Less than two bars found for significance annotation.")
+        else:
+            print("Cannot compare - missing low or high progress data")
+        
+        print("\nStatistical comparison - Subgoal stay | Goal stay (Low vs High subgoal progress):")
+        if len(results_df_conditional) == 2:  # Both low and high present
+            low_row = results_df_conditional[results_df_conditional['progress_level'] == 'Low Progress (0-0.5)'].iloc[0]
+            high_row = results_df_conditional[results_df_conditional['progress_level'] == 'High Progress (0.5-1.0)'].iloc[0]
+            
+            # Chi-square test for difference in proportions
+            low_stayed = low_row['stayed_count']
+            low_total = low_row['total_count']
+            low_switched = low_total - low_stayed
+            
+            high_stayed = high_row['stayed_count']
+            high_total = high_row['total_count']
+            high_switched = high_total - high_stayed
+            
+            # Contingency table
+            contingency = [[low_stayed, low_switched], 
+                          [high_stayed, high_switched]]
+            
+            chi2, p_value = stats.chi2_contingency(contingency)[:2]
+            
+            print(f"Low={low_row['stay_proportion']:.3f}, "
+                  f"High={high_row['stay_proportion']:.3f}, "
+                  f"χ²={chi2:.3f}, p={p_value:.4f}")
+            
+            # Add significance markers to ax2
+            if p_value < 0.05 and len(results_df_conditional) > 0:
+                bars = ax2.patches
+                bar_heights = [bar.get_height() for bar in bars]
+                if len(bar_heights) >= 2:
+                    max_height = max(bar_heights[0], bar_heights[1])
+                    bracket_height = max_height + 0.05
+                    line_height = bracket_height + 0.02
+                    x0 = bars[0].get_x() + bars[0].get_width() / 2
+                    x1 = bars[1].get_x() + bars[1].get_width() / 2
+                    ax2.plot([x0, x0, x1, x1], [bracket_height, line_height, line_height, bracket_height], 
+                            'k-', linewidth=1.5)
+                    sig_text = '***' if p_value < 0.001 else ('**' if p_value < 0.01 else '*')
+                    ax2.text((x0 + x1) / 2, line_height + 0.01, sig_text, 
+                            ha='center', va='bottom', fontsize=16, fontweight='bold')
         else:
             print("Cannot compare - missing low or high progress data")
         
@@ -5309,8 +5455,1192 @@ class PlotMeasures:
                    dpi=300, bbox_inches='tight')
         plt.show()
         
+        return results_df_raw, results_df_conditional
+
+    def plot_stay_proportion_with_progress_simulated(self, model_name):
+        """
+        Plot goal selection stay proportions by progress level using model-simulated data.
+        Same plot as plot_stay_proportion_with_progress() but loads simulated CSV for the given model.
+
+        Args:
+            model_name (str): Name of the model (e.g. 'resources', 'momentum_learn_alt_goal').
+                             Simulated data is loaded from cache: all_subjects_behavior_data_{data_type}_{model_name}_simulated.csv
+        """
+        behavior_dataframe_csv = CACHE_DIR + f"all_subjects_behavior_data_{self.data_type}_{model_name}_simulated.csv"
+        df = pd.read_csv(behavior_dataframe_csv).copy()
+        df['goal_selected'] = df['goal_selected'].replace('BR', 'OB')
+        df = df.sort_values(by=['subject_id', 'block_num', 'trial_num'])
+        df['prev_goal'] = df.groupby(['subject_id', 'block_num'])['goal_selected'].shift(1)
+        df['prev_goal'] = df['prev_goal'].replace('BR', 'OB')
+        df = df.dropna(subset=['prev_goal'])
+        progress_cols = ['SH_progress', 'BR_progress', 'HO_progress']
+
+        def categorize_progress(progress_val):
+            if pd.isna(progress_val):
+                return None
+            elif 0 <= progress_val <= 2:
+                return 'Low Progress (0-2)'
+            elif 3 <= progress_val <= 5:
+                return 'High Progress (3-5)'
+            else:
+                return None
+
+        def get_goal_progress_level(row):
+            goal = row['goal_selected']
+            progress_col = 'BR_progress' if goal == 'OB' else f'{goal}_progress'
+            if progress_col in df.columns:
+                progress_val = row[progress_col]
+                return categorize_progress(progress_val)
+            return None
+
+        df['progress_level'] = df.apply(get_goal_progress_level, axis=1)
+        df_filtered = df.dropna(subset=['progress_level'])
+        if len(df_filtered) == 0:
+            print("No valid data found for stay proportion analysis (simulated)")
+            return None
+        results_data = []
+        subjects = df_filtered['subject_id'].unique()
+        for progress_level in ['Low Progress (0-2)', 'High Progress (3-5)']:
+            level_data = df_filtered[df_filtered['progress_level'] == progress_level]
+            if len(level_data) == 0:
+                continue
+            subject_proportions = []
+            total_stayed_all_subjects = 0
+            total_trials_all_subjects = 0
+            for subject in subjects:
+                subject_level_data = level_data[level_data['subject_id'] == subject]
+                if len(subject_level_data) > 0:
+                    stayed = (subject_level_data['goal_selected'] == subject_level_data['prev_goal']).sum()
+                    total = len(subject_level_data)
+                    subject_stay_prop = stayed / total if total > 0 else np.nan
+                    if not np.isnan(subject_stay_prop):
+                        subject_proportions.append(subject_stay_prop)
+                        total_stayed_all_subjects += stayed
+                        total_trials_all_subjects += total
+            if len(subject_proportions) > 0:
+                mean_stay_proportion = np.mean(subject_proportions)
+                sem_stay_proportion = np.std(subject_proportions) / np.sqrt(len(subject_proportions))
+            else:
+                mean_stay_proportion = np.nan
+                sem_stay_proportion = np.nan
+            results_data.append({
+                'progress_level': progress_level,
+                'stay_proportion': mean_stay_proportion,
+                'sem': sem_stay_proportion,
+                'n_subjects': len(subject_proportions),
+                'stayed_count': total_stayed_all_subjects,
+                'total_count': total_trials_all_subjects,
+                'subject_proportions': subject_proportions
+            })
+        if not results_data:
+            print("No valid data found for stay proportion analysis (simulated)")
+            return None
+        results_df = pd.DataFrame(results_data)
+        plt.figure(figsize=(7, 6))
+        ax = sns.barplot(
+            data=results_df,
+            x='progress_level',
+            y='stay_proportion',
+            palette=['#D3D3D3', '#696969'],
+            edgecolor='black',
+            width=0.4
+        )
+        x_positions = range(len(results_df))
+        ax.errorbar(x_positions, results_df['stay_proportion'],
+                   yerr=results_df['sem'],
+                   fmt='none',
+                   color='black',
+                   capsize=5,
+                   capthick=2,
+                   linewidth=2)
+        ax.set_xlabel('Progress level', fontsize=18, fontweight='bold')
+        ax.set_ylabel('Goal stay probability', fontsize=18, fontweight='bold')
+        ax.set_ylim(0, 1.0)
+        ax.set_xlim(-0.4, 1.4)
+        ax.set_title(f'Pr(Goal Stay)', fontsize=20, weight='bold')
+        ax.tick_params(axis='x', labelsize=16)
+        ax.tick_params(axis='y', labelsize=16)
+        for label in ax.get_xticklabels():
+            label.set_weight('bold')
+        for label in ax.get_yticklabels():
+            label.set_weight('bold')
+        # Statistical comparison and significance markers (simulated)
+        from scipy import stats
+        if len(results_df) == 2:
+            low_row = results_df[results_df['progress_level'] == 'Low Progress (0-2)'].iloc[0]
+            high_row = results_df[results_df['progress_level'] == 'High Progress (3-5)'].iloc[0]
+            low_stayed = low_row['stayed_count']
+            low_total = low_row['total_count']
+            low_switched = low_total - low_stayed
+            high_stayed = high_row['stayed_count']
+            high_total = high_row['total_count']
+            high_switched = high_total - high_stayed
+            contingency = [[low_stayed, low_switched], [high_stayed, high_switched]]
+            chi2, p_value = stats.chi2_contingency(contingency)[:2]
+            if p_value < 0.05:
+                bars = ax.patches
+                bar_heights = [bar.get_height() for bar in bars]
+                if len(bar_heights) >= 2:
+                    max_height = max(bar_heights[0], bar_heights[1])
+                    bracket_height = max_height + 0.05
+                    line_height = bracket_height + 0.02
+                    x0 = bars[0].get_x() + bars[0].get_width() / 2
+                    x1 = bars[1].get_x() + bars[1].get_width() / 2
+                    ax.plot([x0, x0, x1, x1], [bracket_height, line_height, line_height, bracket_height],
+                            'k-', linewidth=1.5)
+                    sig_text = '***' if p_value < 0.001 else ('**' if p_value < 0.01 else '*')
+                    ax.text((x0 + x1) / 2, line_height + 0.01, sig_text,
+                            ha='center', va='bottom', fontsize=16, fontweight='bold')
+        plt.tight_layout()
+        plt.savefig(self.figure_dir + f"/stay_proportion_with_progress_experiment_{self.experiment}_{model_name}_simulated.png",
+                   dpi=300, bbox_inches='tight')
+        plt.show()
         return results_df
 
+    def plot_stay_proportion_with_progress_subgoals_simulated(self, model_name):
+        """
+        Plot subgoal stay proportions by subgoal progress level using model-simulated data.
+        Same plots as plot_stay_proportion_with_progress_subgoals() but loads simulated CSV for the given model.
+
+        Args:
+            model_name (str): Name of the model (e.g. 'resources', 'momentum_learn_alt_goal').
+                             Simulated data is loaded from cache: all_subjects_behavior_data_{data_type}_{model_name}_simulated.csv
+        """
+        behavior_dataframe_csv = CACHE_DIR + f"all_subjects_behavior_data_{self.data_type}_{model_name}_simulated.csv"
+        df = pd.read_csv(behavior_dataframe_csv).copy()
+        df['goal_selected'] = df['goal_selected'].replace('BR', 'OB')
+        df = df.sort_values(by=['subject_id', 'block_num', 'trial_num'])
+        df['prev_goal'] = df.groupby(['subject_id', 'block_num'])['goal_selected'].shift(1)
+        df['prev_goal'] = df['prev_goal'].replace('BR', 'OB')
+        df['prev_subgoal'] = df.groupby(['subject_id', 'block_num'])['subgoal_selected'].shift(1)
+        df = df.dropna(subset=['prev_goal', 'prev_subgoal'])
+
+        def categorize_progress(progress_val):
+            if pd.isna(progress_val):
+                return None
+            elif 0 <= progress_val < 0.5:
+                return 'Low Progress (0-0.5)'
+            elif 0.5 <= progress_val <= 1.0:
+                return 'High Progress (0.5-1.0)'
+            else:
+                return None
+
+        def get_subgoal_progress_level(row):
+            subgoal = row['subgoal_selected']
+            goal = row['goal_selected']
+            goal_for_progress = 'BR' if goal == 'OB' else goal
+            progress_col = f'{subgoal}_progress_{goal_for_progress}'
+            if progress_col in df.columns:
+                progress_val = row[progress_col]
+                return categorize_progress(progress_val)
+            return None
+
+        df['progress_level'] = df.apply(get_subgoal_progress_level, axis=1)
+        df_filtered = df.dropna(subset=['progress_level'])
+        if len(df_filtered) == 0:
+            print("No valid data found for subgoal stay proportion analysis (simulated)")
+            return None
+        subjects = df_filtered['subject_id'].unique()
+        results_data_raw = []
+        for progress_level in ['Low Progress (0-0.5)', 'High Progress (0.5-1.0)']:
+            level_data = df_filtered[df_filtered['progress_level'] == progress_level]
+            if len(level_data) == 0:
+                continue
+            subject_proportions = []
+            total_stayed_all_subjects = 0
+            total_trials_all_subjects = 0
+            for subject in subjects:
+                subject_level_data = level_data[level_data['subject_id'] == subject]
+                if len(subject_level_data) > 0:
+                    subgoal_stayed = (subject_level_data['subgoal_selected'] == subject_level_data['prev_subgoal']).sum()
+                    total = len(subject_level_data)
+                    subject_stay_prop = subgoal_stayed / total if total > 0 else np.nan
+                    if not np.isnan(subject_stay_prop):
+                        subject_proportions.append(subject_stay_prop)
+                        total_stayed_all_subjects += subgoal_stayed
+                        total_trials_all_subjects += total
+            if len(subject_proportions) > 0:
+                mean_stay_proportion = np.mean(subject_proportions)
+                sem_stay_proportion = np.std(subject_proportions) / np.sqrt(len(subject_proportions))
+            else:
+                mean_stay_proportion = np.nan
+                sem_stay_proportion = np.nan
+            results_data_raw.append({
+                'progress_level': progress_level,
+                'stay_proportion': mean_stay_proportion,
+                'sem': sem_stay_proportion,
+                'n_subjects': len(subject_proportions),
+                'stayed_count': total_stayed_all_subjects,
+                'total_count': total_trials_all_subjects,
+                'subject_proportions': subject_proportions
+            })
+        results_data_conditional = []
+        for progress_level in ['Low Progress (0-0.5)', 'High Progress (0.5-1.0)']:
+            level_data = df_filtered[df_filtered['progress_level'] == progress_level]
+            if len(level_data) == 0:
+                continue
+            subject_proportions = []
+            total_stayed_all_subjects = 0
+            total_trials_all_subjects = 0
+            for subject in subjects:
+                subject_level_data = level_data[level_data['subject_id'] == subject]
+                if len(subject_level_data) > 0:
+                    goal_stayed_data = subject_level_data[
+                        subject_level_data['goal_selected'] == subject_level_data['prev_goal']
+                    ]
+                    if len(goal_stayed_data) > 0:
+                        subgoal_stayed = (goal_stayed_data['subgoal_selected'] == goal_stayed_data['prev_subgoal']).sum()
+                        total_goal_stays = len(goal_stayed_data)
+                        subject_stay_prop = subgoal_stayed / total_goal_stays if total_goal_stays > 0 else np.nan
+                        if not np.isnan(subject_stay_prop):
+                            subject_proportions.append(subject_stay_prop)
+                            total_stayed_all_subjects += subgoal_stayed
+                            total_trials_all_subjects += total_goal_stays
+            if len(subject_proportions) > 0:
+                mean_stay_proportion = np.mean(subject_proportions)
+                sem_stay_proportion = np.std(subject_proportions) / np.sqrt(len(subject_proportions))
+            else:
+                mean_stay_proportion = np.nan
+                sem_stay_proportion = np.nan
+            results_data_conditional.append({
+                'progress_level': progress_level,
+                'stay_proportion': mean_stay_proportion,
+                'sem': sem_stay_proportion,
+                'n_subjects': len(subject_proportions),
+                'stayed_count': total_stayed_all_subjects,
+                'total_count': total_trials_all_subjects,
+                'subject_proportions': subject_proportions
+            })
+        if not results_data_raw and not results_data_conditional:
+            print("No valid data found for subgoal stay proportion analysis (simulated)")
+            return None
+        results_df_raw = pd.DataFrame(results_data_raw) if results_data_raw else pd.DataFrame()
+        results_df_conditional = pd.DataFrame(results_data_conditional) if results_data_conditional else pd.DataFrame()
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+        if len(results_df_raw) > 0:
+            sns.barplot(
+                data=results_df_raw,
+                x='progress_level',
+                y='stay_proportion',
+                palette=['#D3D3D3', '#696969'],
+                edgecolor='black',
+                width=0.4,
+                ax=ax1
+            )
+            x_positions = range(len(results_df_raw))
+            ax1.errorbar(x_positions, results_df_raw['stay_proportion'],
+                       yerr=results_df_raw['sem'],
+                       fmt='none',
+                       color='black',
+                       capsize=5,
+                       capthick=2,
+                       linewidth=2)
+        ax1.set_xlabel('Subgoal progress level', fontsize=18, fontweight='bold')
+        ax1.set_ylabel('Subgoal stay probability', fontsize=18, fontweight='bold')
+        ax1.set_ylim(0, 1.0)
+        ax1.set_xlim(-0.4, 1.4)
+        ax1.set_title(f'Pr(Subgoal Stay)', fontsize=20, weight='bold')
+        ax1.tick_params(axis='x', labelsize=16)
+        ax1.tick_params(axis='y', labelsize=16)
+        for label in ax1.get_xticklabels():
+            label.set_weight('bold')
+        for label in ax1.get_yticklabels():
+            label.set_weight('bold')
+        if len(results_df_conditional) > 0:
+            sns.barplot(
+                data=results_df_conditional,
+                x='progress_level',
+                y='stay_proportion',
+                palette=['#D3D3D3', '#696969'],
+                edgecolor='black',
+                width=0.4,
+                ax=ax2
+            )
+            x_positions = range(len(results_df_conditional))
+            ax2.errorbar(x_positions, results_df_conditional['stay_proportion'],
+                       yerr=results_df_conditional['sem'],
+                       fmt='none',
+                       color='black',
+                       capsize=5,
+                       capthick=2,
+                       linewidth=2)
+        ax2.set_xlabel('Subgoal progress level', fontsize=18, fontweight='bold')
+        ax2.set_ylabel('Subgoal stay probability', fontsize=18, fontweight='bold')
+        ax2.set_ylim(0, 1.0)
+        ax2.set_xlim(-0.4, 1.4)
+        ax2.set_title(f'Pr(Subgoal Stay | Goal Stay)', fontsize=20, weight='bold')
+        ax2.tick_params(axis='x', labelsize=16)
+        ax2.tick_params(axis='y', labelsize=16)
+        for label in ax2.get_xticklabels():
+            label.set_weight('bold')
+        for label in ax2.get_yticklabels():
+            label.set_weight('bold')
+        plt.tight_layout()
+        plt.savefig(self.figure_dir + f"/stay_proportion_with_progress_subgoals_experiment_{self.experiment}_{model_name}_simulated.png",
+                   dpi=300, bbox_inches='tight')
+        plt.show()
+        return results_df_raw, results_df_conditional
+
+    def plot_stay_proportion_with_progress_subgoals_by_condition(self):
+        """
+        Plot subgoal stay | given goal stay by subgoal progress levels, split by high/low block types.
+        Shows subgoal stay probability conditioned on goal stay, split by:
+        - High block types (0, 1, 2) vs Low block types (3, 4, 5)
+        - Low progress (0-0.5) vs High progress (0.5-1.0)
+        """
+        df = self.df.copy()
+        
+        # Replace 'BR' with 'OB' for consistency
+        df['goal_selected'] = df['goal_selected'].replace('BR', 'OB')
+        
+        # Create high/low condition mapping (0,1,2 are high; 3,4,5 are low)
+        df['condition_type'] = df['block_type'].map({0: 'high', 1: 'high', 2: 'high', 
+                                                    3: 'low', 4: 'low', 5: 'low'})
+        
+        # Ensure proper sorting
+        df = df.sort_values(by=['subject_id', 'block_num', 'trial_num'])
+        
+        # Create previous goal and subgoal selection for comparison
+        df['prev_goal'] = df.groupby(['subject_id', 'block_num'])['goal_selected'].shift(1)
+        df['prev_goal'] = df['prev_goal'].replace('BR', 'OB')
+        df['prev_subgoal'] = df.groupby(['subject_id', 'block_num'])['subgoal_selected'].shift(1)
+        
+        # Remove first trial of each block (no previous selection)
+        df = df.dropna(subset=['prev_goal', 'prev_subgoal', 'condition_type'])
+        
+        # Function to categorize progress levels
+        def categorize_progress(progress_val):
+            if pd.isna(progress_val):
+                return None
+            elif 0 <= progress_val < 0.5:
+                return 'Low Progress (0-0.5)'
+            elif 0.5 <= progress_val <= 1.0:
+                return 'High Progress (0.5-1.0)'
+            else:
+                return None
+        
+        # Create a combined progress level column based on the selected subgoal's progress for the selected goal
+        def get_subgoal_progress_level(row):
+            subgoal = row['subgoal_selected']
+            goal = row['goal_selected']
+            
+            # Map OB back to BR for progress column naming
+            goal_for_progress = 'BR' if goal == 'OB' else goal
+            progress_col = f'{subgoal}_progress_{goal_for_progress}'
+            
+            if progress_col in df.columns:
+                progress_val = row[progress_col]
+                return categorize_progress(progress_val)
+            return None
+        
+        df['progress_level'] = df.apply(get_subgoal_progress_level, axis=1)
+        
+        # Remove rows with undefined progress levels
+        df_filtered = df.dropna(subset=['progress_level', 'condition_type'])
+        
+        if len(df_filtered) == 0:
+            print("No valid data found for subgoal stay proportion analysis by condition")
+            return None
+        
+        subjects = df_filtered['subject_id'].unique()
+        
+        # Calculate subgoal stay given goal stay, split by condition type and progress level
+        results_data = []
+        
+        for condition_type in ['high', 'low']:
+            condition_data = df_filtered[df_filtered['condition_type'] == condition_type]
+            
+            for progress_level in ['Low Progress (0-0.5)', 'High Progress (0.5-1.0)']:
+                level_data = condition_data[condition_data['progress_level'] == progress_level]
+                
+                if len(level_data) == 0:
+                    continue
+                
+                subject_proportions = []
+                total_stayed_all_subjects = 0
+                total_trials_all_subjects = 0
+                
+                for subject in subjects:
+                    subject_level_data = level_data[level_data['subject_id'] == subject]
+                    
+                    if len(subject_level_data) > 0:
+                        # First, filter to only trials where goal stayed
+                        goal_stayed_data = subject_level_data[
+                            subject_level_data['goal_selected'] == subject_level_data['prev_goal']
+                        ]
+                        
+                        if len(goal_stayed_data) > 0:
+                            # Then check if subgoal stayed given that goal stayed
+                            subgoal_stayed = (goal_stayed_data['subgoal_selected'] == goal_stayed_data['prev_subgoal']).sum()
+                            total_goal_stays = len(goal_stayed_data)
+                            subject_stay_prop = subgoal_stayed / total_goal_stays if total_goal_stays > 0 else np.nan
+                            
+                            if not np.isnan(subject_stay_prop):
+                                subject_proportions.append(subject_stay_prop)
+                                total_stayed_all_subjects += subgoal_stayed
+                                total_trials_all_subjects += total_goal_stays
+                
+                if len(subject_proportions) > 0:
+                    mean_stay_proportion = np.mean(subject_proportions)
+                    sem_stay_proportion = np.std(subject_proportions) / np.sqrt(len(subject_proportions))
+                else:
+                    mean_stay_proportion = np.nan
+                    sem_stay_proportion = np.nan
+                
+                results_data.append({
+                    'condition_type': condition_type,
+                    'progress_level': progress_level,
+                    'stay_proportion': mean_stay_proportion,
+                    'sem': sem_stay_proportion,
+                    'n_subjects': len(subject_proportions),
+                    'stayed_count': total_stayed_all_subjects,
+                    'total_count': total_trials_all_subjects,
+                    'subject_proportions': subject_proportions
+                })
+        
+        if not results_data:
+            print("No valid data found for subgoal stay proportion analysis by condition")
+            return None
+        
+        # Convert to DataFrame
+        results_df = pd.DataFrame(results_data)
+        
+        # Print summaries
+        print("\nSubgoal stay | Goal stay by condition type and progress level:")
+        for condition_type in ['high', 'low']:
+            print(f"\n{condition_type.upper()} condition:")
+            condition_results = results_df[results_df['condition_type'] == condition_type]
+            for _, row in condition_results.iterrows():
+                print(f"  {row['progress_level']}: "
+                      f"{row['stay_proportion']:.3f} ({row['stayed_count']}/{row['total_count']})")
+        
+        # Create the plot with two subplots (high and low)
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+        
+        # Determine experiment number
+        if self.data_type == "online":
+            experiment = 'H2'
+        elif self.data_type == "fmri":
+            experiment = 'H1'
+        else:
+            experiment = ""
+        
+        # Plot for high condition (use lighter grays)
+        results_high = results_df[results_df['condition_type'] == 'high']
+        if len(results_high) > 0:
+            sns.barplot(
+                data=results_high,
+                x='progress_level',
+                y='stay_proportion',
+                palette=['#F5F5F5', '#B0B0B0'],  # Very light grays for high condition
+                edgecolor='black',
+                width=0.4,
+                ax=ax1
+            )
+            
+            x_positions = range(len(results_high))
+            ax1.errorbar(x_positions, results_high['stay_proportion'], 
+                       yerr=results_high['sem'], 
+                       fmt='none', 
+                       color='black', 
+                       capsize=5, 
+                       capthick=2, 
+                       linewidth=2)
+        
+        ax1.set_xlabel('Subgoal progress level', fontsize=18, fontweight='bold')
+        ax1.set_ylabel('Subgoal stay probability', fontsize=20, fontweight='bold')
+        ax1.set_ylim(0, 1.0)
+        ax1.set_xlim(-0.4, 1.4)
+        ax1.set_title(f'Pr(Subgoal Stay | Goal Stay): High', 
+                    fontsize=20, weight='bold')
+        ax1.tick_params(axis='x', labelsize=16)
+        ax1.tick_params(axis='y', labelsize=16)
+        for label in ax1.get_xticklabels():
+            label.set_weight('bold')
+        for label in ax1.get_yticklabels():
+            label.set_weight('bold')
+        
+        # Plot for low condition (use darker grays)
+        results_low = results_df[results_df['condition_type'] == 'low']
+        if len(results_low) > 0:
+            sns.barplot(
+                data=results_low,
+                x='progress_level',
+                y='stay_proportion',
+                palette=['#707070', '#202020'],  # Very dark grays for low condition
+                edgecolor='black',
+                width=0.4,
+                ax=ax2
+            )
+            
+            x_positions = range(len(results_low))
+            ax2.errorbar(x_positions, results_low['stay_proportion'], 
+                       yerr=results_low['sem'], 
+                       fmt='none', 
+                       color='black', 
+                       capsize=5, 
+                       capthick=2, 
+                       linewidth=2)
+        
+        ax2.set_xlabel('Subgoal progress level', fontsize=18, fontweight='bold')
+        ax2.set_ylabel('Subgoal stay probability', fontsize=20, fontweight='bold')
+        ax2.set_ylim(0, 1.0)
+        ax2.set_xlim(-0.4, 1.4)
+        ax2.set_title(f'Pr(Subgoal Stay | Goal Stay): Low', 
+                    fontsize=20, weight='bold')
+        ax2.tick_params(axis='x', labelsize=16)
+        ax2.tick_params(axis='y', labelsize=16)
+        for label in ax2.get_xticklabels():
+            label.set_weight('bold')
+        for label in ax2.get_yticklabels():
+            label.set_weight('bold')
+        
+        plt.tight_layout()
+        
+        # Statistical analysis: compare low vs high progress for each condition
+        from scipy import stats
+        
+        for condition_type in ['high', 'low']:
+            condition_results = results_df[results_df['condition_type'] == condition_type]
+            print(f"\nStatistical comparison - {condition_type.upper()} condition (Low vs High subgoal progress):")
+            
+            if len(condition_results) == 2:  # Both low and high progress present
+                low_row = condition_results[condition_results['progress_level'] == 'Low Progress (0-0.5)'].iloc[0]
+                high_row = condition_results[condition_results['progress_level'] == 'High Progress (0.5-1.0)'].iloc[0]
+                
+                # Chi-square test for difference in proportions
+                low_stayed = low_row['stayed_count']
+                low_total = low_row['total_count']
+                low_switched = low_total - low_stayed
+                
+                high_stayed = high_row['stayed_count']
+                high_total = high_row['total_count']
+                high_switched = high_total - high_stayed
+                
+                # Contingency table
+                contingency = [[low_stayed, low_switched], 
+                              [high_stayed, high_switched]]
+                
+                chi2, p_value = stats.chi2_contingency(contingency)[:2]
+                
+                print(f"Low={low_row['stay_proportion']:.3f}, "
+                      f"High={high_row['stay_proportion']:.3f}, "
+                      f"χ²={chi2:.3f}, p={p_value:.4f}")
+                
+                # Add significance markers to the appropriate plot
+                ax = ax1 if condition_type == 'high' else ax2
+                if p_value < 0.05 and len(condition_results) > 0:
+                    bars = ax.patches
+                    bar_heights = [bar.get_height() for bar in bars]
+                    if len(bar_heights) >= 2:
+                        max_height = max(bar_heights[0], bar_heights[1])
+                        bracket_height = max_height + 0.05
+                        line_height = bracket_height + 0.02
+                        x0 = bars[0].get_x() + bars[0].get_width() / 2
+                        x1 = bars[1].get_x() + bars[1].get_width() / 2
+                        ax.plot([x0, x0, x1, x1], [bracket_height, line_height, line_height, bracket_height], 
+                                'k-', linewidth=1.5)
+                        sig_text = '***' if p_value < 0.001 else ('**' if p_value < 0.01 else '*')
+                        ax.text((x0 + x1) / 2, line_height + 0.01, sig_text, 
+                                ha='center', va='bottom', fontsize=16, fontweight='bold')
+            else:
+                print("Cannot compare - missing low or high progress data")
+        
+        # Save figure
+        plt.savefig(self.figure_dir + f"/stay_proportion_with_progress_subgoals_by_condition_experiment_{self.experiment}.png", 
+                   dpi=300, bbox_inches='tight')
+        plt.show()
+        
+        return results_df
+
+    def plot_stay_proportion_with_progress_goals_by_condition(self):
+        """
+        Plot goal stay by goal progress levels, split by high/low block types.
+        Shows goal stay probability split by:
+        - High block types (0, 1, 2) vs Low block types (3, 4, 5)
+        - Low progress (0-2) vs High progress (3-5)
+        """
+        df = self.df.copy()
+        
+        # Replace 'BR' with 'OB' for consistency
+        df['goal_selected'] = df['goal_selected'].replace('BR', 'OB')
+        
+        # Create high/low condition mapping (0,1,2 are high; 3,4,5 are low)
+        df['condition_type'] = df['block_type'].map({0: 'high', 1: 'high', 2: 'high', 
+                                                    3: 'low', 4: 'low', 5: 'low'})
+        
+        # Ensure proper sorting
+        df = df.sort_values(by=['subject_id', 'block_num', 'trial_num'])
+        
+        # Create previous goal selection for comparison
+        df['prev_goal'] = df.groupby(['subject_id', 'block_num'])['goal_selected'].shift(1)
+        df['prev_goal'] = df['prev_goal'].replace('BR', 'OB')
+        
+        # Remove first trial of each block (no previous selection)
+        df = df.dropna(subset=['prev_goal', 'condition_type'])
+        
+        # Function to categorize progress levels
+        def categorize_progress(progress_val):
+            if pd.isna(progress_val):
+                return None
+            elif 0 <= progress_val <= 2:
+                return 'Low Progress (0-2)'
+            elif 3 <= progress_val <= 5:
+                return 'High Progress (3-5)'
+            else:
+                return None
+        
+        # Create a combined progress level column based on the selected goal's progress
+        def get_goal_progress_level(row):
+            goal = row['goal_selected']
+            # Use BR for progress column but OB for goal matching
+            progress_col = 'BR_progress' if goal == 'OB' else f'{goal}_progress'
+            
+            if progress_col in df.columns:
+                progress_val = row[progress_col]
+                return categorize_progress(progress_val)
+            return None
+        
+        df['progress_level'] = df.apply(get_goal_progress_level, axis=1)
+        
+        # Remove rows with undefined progress levels
+        df_filtered = df.dropna(subset=['progress_level', 'condition_type'])
+        
+        if len(df_filtered) == 0:
+            print("No valid data found for goal stay proportion analysis by condition")
+            return None
+        
+        subjects = df_filtered['subject_id'].unique()
+        
+        # Calculate goal stay, split by condition type and progress level
+        results_data = []
+        
+        for condition_type in ['high', 'low']:
+            condition_data = df_filtered[df_filtered['condition_type'] == condition_type]
+            
+            for progress_level in ['Low Progress (0-2)', 'High Progress (3-5)']:
+                level_data = condition_data[condition_data['progress_level'] == progress_level]
+                
+                if len(level_data) == 0:
+                    continue
+                
+                subject_proportions = []
+                total_stayed_all_subjects = 0
+                total_trials_all_subjects = 0
+                
+                for subject in subjects:
+                    subject_level_data = level_data[level_data['subject_id'] == subject]
+                    
+                    if len(subject_level_data) > 0:
+                        # Calculate goal stay proportion for this subject
+                        goal_stayed = (subject_level_data['goal_selected'] == subject_level_data['prev_goal']).sum()
+                        total = len(subject_level_data)
+                        subject_stay_prop = goal_stayed / total if total > 0 else np.nan
+                        
+                        if not np.isnan(subject_stay_prop):
+                            subject_proportions.append(subject_stay_prop)
+                            total_stayed_all_subjects += goal_stayed
+                            total_trials_all_subjects += total
+                
+                if len(subject_proportions) > 0:
+                    mean_stay_proportion = np.mean(subject_proportions)
+                    sem_stay_proportion = np.std(subject_proportions) / np.sqrt(len(subject_proportions))
+                else:
+                    mean_stay_proportion = np.nan
+                    sem_stay_proportion = np.nan
+                
+                results_data.append({
+                    'condition_type': condition_type,
+                    'progress_level': progress_level,
+                    'stay_proportion': mean_stay_proportion,
+                    'sem': sem_stay_proportion,
+                    'n_subjects': len(subject_proportions),
+                    'stayed_count': total_stayed_all_subjects,
+                    'total_count': total_trials_all_subjects,
+                    'subject_proportions': subject_proportions
+                })
+        
+        if not results_data:
+            print("No valid data found for goal stay proportion analysis by condition")
+            return None
+        
+        # Convert to DataFrame
+        results_df = pd.DataFrame(results_data)
+        
+        # Print summaries
+        print("\nGoal stay by condition type and progress level:")
+        for condition_type in ['high', 'low']:
+            print(f"\n{condition_type.upper()} condition:")
+            condition_results = results_df[results_df['condition_type'] == condition_type]
+            for _, row in condition_results.iterrows():
+                print(f"  {row['progress_level']}: "
+                      f"{row['stay_proportion']:.3f} ({row['stayed_count']}/{row['total_count']})")
+        
+        # Create the plot with two subplots (high and low)
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+        
+        # Determine experiment number
+        if self.data_type == "online":
+            experiment = 'H2'
+        elif self.data_type == "fmri":
+            experiment = 'H1'
+        else:
+            experiment = ""
+        
+        # Plot for high condition (use lighter grays)
+        results_high = results_df[results_df['condition_type'] == 'high']
+        if len(results_high) > 0:
+            sns.barplot(
+                data=results_high,
+                x='progress_level',
+                y='stay_proportion',
+                palette=['#F5F5F5', '#B0B0B0'],  # Very light grays for high condition
+                edgecolor='black',
+                width=0.4,
+                ax=ax1
+            )
+            
+            x_positions = range(len(results_high))
+            ax1.errorbar(x_positions, results_high['stay_proportion'], 
+                       yerr=results_high['sem'], 
+                       fmt='none', 
+                       color='black', 
+                       capsize=5, 
+                       capthick=2, 
+                       linewidth=2)
+        
+        ax1.set_xlabel('Goal progress level', fontsize=18, fontweight='bold')
+        ax1.set_ylabel('Goal stay probability', fontsize=20, fontweight='bold')
+        ax1.set_ylim(0, 1.0)
+        ax1.set_xlim(-0.4, 1.4)
+        ax1.set_title(f'Pr(Goal Stay): High', 
+                    fontsize=20, weight='bold')
+        ax1.tick_params(axis='x', labelsize=16)
+        ax1.tick_params(axis='y', labelsize=16)
+        for label in ax1.get_xticklabels():
+            label.set_weight('bold')
+        for label in ax1.get_yticklabels():
+            label.set_weight('bold')
+        
+        # Plot for low condition (use darker grays)
+        results_low = results_df[results_df['condition_type'] == 'low']
+        if len(results_low) > 0:
+            sns.barplot(
+                data=results_low,
+                x='progress_level',
+                y='stay_proportion',
+                palette=['#707070', '#202020'],  # Very dark grays for low condition
+                edgecolor='black',
+                width=0.4,
+                ax=ax2
+            )
+            
+            x_positions = range(len(results_low))
+            ax2.errorbar(x_positions, results_low['stay_proportion'], 
+                       yerr=results_low['sem'], 
+                       fmt='none', 
+                       color='black', 
+                       capsize=5, 
+                       capthick=2, 
+                       linewidth=2)
+        
+        ax2.set_xlabel('Goal progress level', fontsize=18, fontweight='bold')
+        ax2.set_ylabel('Goal stay probability', fontsize=20, fontweight='bold')
+        ax2.set_ylim(0, 1.0)
+        ax2.set_xlim(-0.4, 1.4)
+        ax2.set_title(f'Pr(Goal Stay): Low', 
+                    fontsize=20, weight='bold')
+        ax2.tick_params(axis='x', labelsize=16)
+        ax2.tick_params(axis='y', labelsize=16)
+        for label in ax2.get_xticklabels():
+            label.set_weight('bold')
+        for label in ax2.get_yticklabels():
+            label.set_weight('bold')
+        
+        plt.tight_layout()
+        
+        # Statistical analysis: compare low vs high progress for each condition
+        from scipy import stats
+        
+        for condition_type in ['high', 'low']:
+            condition_results = results_df[results_df['condition_type'] == condition_type]
+            print(f"\nStatistical comparison - {condition_type.upper()} condition (Low vs High goal progress):")
+            
+            if len(condition_results) == 2:  # Both low and high progress present
+                low_row = condition_results[condition_results['progress_level'] == 'Low Progress (0-2)'].iloc[0]
+                high_row = condition_results[condition_results['progress_level'] == 'High Progress (3-5)'].iloc[0]
+                
+                # Chi-square test for difference in proportions
+                low_stayed = low_row['stayed_count']
+                low_total = low_row['total_count']
+                low_switched = low_total - low_stayed
+                
+                high_stayed = high_row['stayed_count']
+                high_total = high_row['total_count']
+                high_switched = high_total - high_stayed
+                
+                # Contingency table
+                contingency = [[low_stayed, low_switched], 
+                              [high_stayed, high_switched]]
+                
+                chi2, p_value = stats.chi2_contingency(contingency)[:2]
+                
+                print(f"Low={low_row['stay_proportion']:.3f}, "
+                      f"High={high_row['stay_proportion']:.3f}, "
+                      f"χ²={chi2:.3f}, p={p_value:.4f}")
+                
+                # Add significance markers to the appropriate plot
+                ax = ax1 if condition_type == 'high' else ax2
+                if p_value < 0.05 and len(condition_results) > 0:
+                    bars = ax.patches
+                    bar_heights = [bar.get_height() for bar in bars]
+                    if len(bar_heights) >= 2:
+                        max_height = max(bar_heights[0], bar_heights[1])
+                        bracket_height = max_height + 0.05
+                        line_height = bracket_height + 0.02
+                        x0 = bars[0].get_x() + bars[0].get_width() / 2
+                        x1 = bars[1].get_x() + bars[1].get_width() / 2
+                        ax.plot([x0, x0, x1, x1], [bracket_height, line_height, line_height, bracket_height], 
+                                'k-', linewidth=1.5)
+                        sig_text = '***' if p_value < 0.001 else ('**' if p_value < 0.01 else '*')
+                        ax.text((x0 + x1) / 2, line_height + 0.01, sig_text, 
+                                ha='center', va='bottom', fontsize=16, fontweight='bold')
+            else:
+                print("Cannot compare - missing low or high progress data")
+        
+        # Save figure
+        plt.savefig(self.figure_dir + f"/stay_proportion_with_progress_goals_by_condition_experiment_{self.experiment}.png", 
+                   dpi=300, bbox_inches='tight')
+        plt.show()
+        
+        return results_df
+
+    def plot_goal_stay_by_block_type(self):
+        """
+        Plot goal stay probability collapsed across progress, comparing high vs low block types.
+        Single bar plot: High block types (0, 1, 2) vs Low block types (3, 4, 5).
+        """
+        df = self.df.copy()
+        
+        # Replace 'BR' with 'OB' for consistency
+        df['goal_selected'] = df['goal_selected'].replace('BR', 'OB')
+        
+        # Create high/low condition mapping (0,1,2 are high; 3,4,5 are low)
+        df['condition_type'] = df['block_type'].map({0: 'high', 1: 'high', 2: 'high',
+                                                     3: 'low', 4: 'low', 5: 'low'})
+        
+        # Ensure proper sorting
+        df = df.sort_values(by=['subject_id', 'block_num', 'trial_num'])
+        
+        # Create previous goal selection for comparison
+        df['prev_goal'] = df.groupby(['subject_id', 'block_num'])['goal_selected'].shift(1)
+        df['prev_goal'] = df['prev_goal'].replace('BR', 'OB')
+        
+        # Remove first trial of each block (no previous selection)
+        df = df.dropna(subset=['prev_goal', 'condition_type'])
+        
+        if len(df) == 0:
+            print("No valid data found for goal stay by block type analysis")
+            return None
+        
+        subjects = df['subject_id'].unique()
+        
+        # Calculate goal stay proportion for each condition type (collapsed across progress)
+        results_data = []
+        
+        for condition_type in ['high', 'low']:
+            condition_data = df[df['condition_type'] == condition_type]
+            
+            if len(condition_data) == 0:
+                continue
+            
+            subject_proportions = []
+            total_stayed_all_subjects = 0
+            total_trials_all_subjects = 0
+            
+            for subject in subjects:
+                subject_condition_data = condition_data[condition_data['subject_id'] == subject]
+                
+                if len(subject_condition_data) > 0:
+                    goal_stayed = (subject_condition_data['goal_selected'] == subject_condition_data['prev_goal']).sum()
+                    total = len(subject_condition_data)
+                    subject_stay_prop = goal_stayed / total if total > 0 else np.nan
+                    
+                    if not np.isnan(subject_stay_prop):
+                        subject_proportions.append(subject_stay_prop)
+                        total_stayed_all_subjects += goal_stayed
+                        total_trials_all_subjects += total
+            
+            if len(subject_proportions) > 0:
+                mean_stay_proportion = np.mean(subject_proportions)
+                sem_stay_proportion = np.std(subject_proportions) / np.sqrt(len(subject_proportions))
+            else:
+                mean_stay_proportion = np.nan
+                sem_stay_proportion = np.nan
+            
+            # Label for plot (capitalize for axis)
+            condition_label = 'High' if condition_type == 'high' else 'Low'
+            results_data.append({
+                'condition_type': condition_type,
+                'condition_label': condition_label,
+                'stay_proportion': mean_stay_proportion,
+                'sem': sem_stay_proportion,
+                'n_subjects': len(subject_proportions),
+                'stayed_count': total_stayed_all_subjects,
+                'total_count': total_trials_all_subjects,
+                'subject_proportions': subject_proportions
+            })
+        
+        if not results_data or len(results_data) < 2:
+            print("No valid data found for goal stay by block type analysis")
+            return None
+        
+        results_df = pd.DataFrame(results_data)
+        
+        # Print summary
+        print("\nGoal stay by block type (collapsed across progress):")
+        for _, row in results_df.iterrows():
+            print(f"  {row['condition_label']}: "
+                  f"{row['stay_proportion']:.3f} ± {row['sem']:.3f} "
+                  f"({row['stayed_count']}/{row['total_count']}, n={row['n_subjects']} subjects)")
+        
+        # Create single bar plot
+        fig, ax = plt.subplots(1, 1, figsize=(7, 6))
+        
+        sns.barplot(
+            data=results_df,
+            x='condition_label',
+            y='stay_proportion',
+            palette=['#D3D3D3', '#696969'],  # Light gray for high, dark gray for low
+            edgecolor='black',
+            width=0.4,
+            ax=ax
+        )
+        
+        x_positions = range(len(results_df))
+        ax.errorbar(x_positions, results_df['stay_proportion'],
+                    yerr=results_df['sem'],
+                    fmt='none',
+                    color='black',
+                    capsize=5,
+                    capthick=2,
+                    linewidth=2)
+        
+        ax.set_xlabel('Block type', fontsize=18, fontweight='bold')
+        ax.set_ylabel('Goal stay probability', fontsize=20, fontweight='bold')
+        ax.set_ylim(0, 1.0)
+        ax.set_title('Pr(Goal Stay) by Block Type', fontsize=20, weight='bold')
+        ax.tick_params(axis='x', labelsize=16)
+        ax.tick_params(axis='y', labelsize=16)
+        for label in ax.get_xticklabels():
+            label.set_weight('bold')
+        for label in ax.get_yticklabels():
+            label.set_weight('bold')
+        
+        # Statistical comparison: High vs Low
+        from scipy import stats
+        print("\nStatistical comparison (High vs Low block type):")
+        if len(results_df) == 2:
+            high_row = results_df[results_df['condition_type'] == 'high'].iloc[0]
+            low_row = results_df[results_df['condition_type'] == 'low'].iloc[0]
+            
+            # Chi-square test
+            contingency = [
+                [high_row['stayed_count'], high_row['total_count'] - high_row['stayed_count']],
+                [low_row['stayed_count'], low_row['total_count'] - low_row['stayed_count']]
+            ]
+            chi2, p_value = stats.chi2_contingency(contingency)[:2]
+            print(f"  High={high_row['stay_proportion']:.3f}, Low={low_row['stay_proportion']:.3f}, "
+                  f"χ²={chi2:.3f}, p={p_value:.4f}")
+            
+            # Add significance marker if significant
+            if p_value < 0.05:
+                bars = ax.patches
+                if len(bars) >= 2:
+                    max_height = max(b.get_height() for b in bars)
+                    bracket_height = max_height + 0.05
+                    line_height = bracket_height + 0.02
+                    x0 = bars[0].get_x() + bars[0].get_width() / 2
+                    x1 = bars[1].get_x() + bars[1].get_width() / 2
+                    ax.plot([x0, x0, x1, x1], [bracket_height, line_height, line_height, bracket_height],
+                            'k-', linewidth=1.5)
+                    sig_text = '***' if p_value < 0.001 else ('**' if p_value < 0.01 else '*')
+                    ax.text((x0 + x1) / 2, line_height + 0.01, sig_text,
+                            ha='center', va='bottom', fontsize=16, fontweight='bold')
+        
+        plt.tight_layout()
+        plt.savefig(self.figure_dir + f"/goal_stay_by_block_type_experiment_{self.experiment}.png",
+                    dpi=300, bbox_inches='tight')
+        plt.show()
+        
+        return results_df
+
+    def plot_subgoal_stay_by_block_type(self):
+        """
+        Plot subgoal stay probability conditioned on goal stay, collapsed across progress,
+        comparing high vs low block types.
+        Single bar plot: High block types (0, 1, 2) vs Low block types (3, 4, 5).
+        """
+        df = self.df.copy()
+        
+        # Replace 'BR' with 'OB' for consistency
+        df['goal_selected'] = df['goal_selected'].replace('BR', 'OB')
+        
+        # Create high/low condition mapping (0,1,2 are high; 3,4,5 are low)
+        df['condition_type'] = df['block_type'].map({0: 'high', 1: 'high', 2: 'high',
+                                                     3: 'low', 4: 'low', 5: 'low'})
+        
+        # Ensure proper sorting
+        df = df.sort_values(by=['subject_id', 'block_num', 'trial_num'])
+        
+        # Create previous goal and subgoal selection for comparison
+        df['prev_goal'] = df.groupby(['subject_id', 'block_num'])['goal_selected'].shift(1)
+        df['prev_goal'] = df['prev_goal'].replace('BR', 'OB')
+        df['prev_subgoal'] = df.groupby(['subject_id', 'block_num'])['subgoal_selected'].shift(1)
+        
+        # Remove first trial of each block (no previous selection)
+        df = df.dropna(subset=['prev_goal', 'prev_subgoal', 'condition_type'])
+        
+        if len(df) == 0:
+            print("No valid data found for subgoal stay by block type analysis")
+            return None
+        
+        subjects = df['subject_id'].unique()
+        
+        # Calculate subgoal stay | goal stay proportion for each condition type (collapsed across progress)
+        results_data = []
+        
+        for condition_type in ['high', 'low']:
+            condition_data = df[df['condition_type'] == condition_type]
+            
+            if len(condition_data) == 0:
+                continue
+            
+            subject_proportions = []
+            total_stayed_all_subjects = 0
+            total_trials_all_subjects = 0
+            
+            for subject in subjects:
+                subject_condition_data = condition_data[condition_data['subject_id'] == subject]
+                
+                if len(subject_condition_data) > 0:
+                    # Restrict to trials where goal stayed
+                    goal_stayed_data = subject_condition_data[
+                        subject_condition_data['goal_selected'] == subject_condition_data['prev_goal']
+                    ]
+                    if len(goal_stayed_data) > 0:
+                        subgoal_stayed = (goal_stayed_data['subgoal_selected'] == goal_stayed_data['prev_subgoal']).sum()
+                        total = len(goal_stayed_data)
+                        subject_stay_prop = subgoal_stayed / total if total > 0 else np.nan
+                        
+                        if not np.isnan(subject_stay_prop):
+                            subject_proportions.append(subject_stay_prop)
+                            total_stayed_all_subjects += subgoal_stayed
+                            total_trials_all_subjects += total
+            
+            if len(subject_proportions) > 0:
+                mean_stay_proportion = np.mean(subject_proportions)
+                sem_stay_proportion = np.std(subject_proportions) / np.sqrt(len(subject_proportions))
+            else:
+                mean_stay_proportion = np.nan
+                sem_stay_proportion = np.nan
+            
+            # Label for plot (capitalize for axis)
+            condition_label = 'High' if condition_type == 'high' else 'Low'
+            results_data.append({
+                'condition_type': condition_type,
+                'condition_label': condition_label,
+                'stay_proportion': mean_stay_proportion,
+                'sem': sem_stay_proportion,
+                'n_subjects': len(subject_proportions),
+                'stayed_count': total_stayed_all_subjects,
+                'total_count': total_trials_all_subjects,
+                'subject_proportions': subject_proportions
+            })
+        
+        if not results_data or len(results_data) < 2:
+            print("No valid data found for subgoal stay by block type analysis")
+            return None
+        
+        results_df = pd.DataFrame(results_data)
+        
+        # Print summary
+        print("\nSubgoal stay | goal stay by block type (collapsed across progress):")
+        for _, row in results_df.iterrows():
+            print(f"  {row['condition_label']}: "
+                  f"{row['stay_proportion']:.3f} ± {row['sem']:.3f} "
+                  f"({row['stayed_count']}/{row['total_count']}, n={row['n_subjects']} subjects)")
+        
+        # Create single bar plot
+        fig, ax = plt.subplots(1, 1, figsize=(7, 6))
+        
+        sns.barplot(
+            data=results_df,
+            x='condition_label',
+            y='stay_proportion',
+            palette=['#D3D3D3', '#696969'],  # Light gray for high, dark gray for low
+            edgecolor='black',
+            width=0.4,
+            ax=ax
+        )
+        
+        x_positions = range(len(results_df))
+        ax.errorbar(x_positions, results_df['stay_proportion'],
+                    yerr=results_df['sem'],
+                    fmt='none',
+                    color='black',
+                    capsize=5,
+                    capthick=2,
+                    linewidth=2)
+        
+        ax.set_xlabel('Block type', fontsize=18, fontweight='bold')
+        ax.set_ylabel('Stay probability', fontsize=20, fontweight='bold')
+        ax.set_ylim(0, 1.0)
+        ax.set_title('Pr(Subgoal Stay | Goal Stay) by Block Type', fontsize=20, weight='bold')
+        ax.tick_params(axis='x', labelsize=16)
+        ax.tick_params(axis='y', labelsize=16)
+        for label in ax.get_xticklabels():
+            label.set_weight('bold')
+        for label in ax.get_yticklabels():
+            label.set_weight('bold')
+        
+        # Statistical comparison: High vs Low
+        from scipy import stats
+        print("\nStatistical comparison (High vs Low block type):")
+        if len(results_df) == 2:
+            high_row = results_df[results_df['condition_type'] == 'high'].iloc[0]
+            low_row = results_df[results_df['condition_type'] == 'low'].iloc[0]
+            
+            # Chi-square test
+            contingency = [
+                [high_row['stayed_count'], high_row['total_count'] - high_row['stayed_count']],
+                [low_row['stayed_count'], low_row['total_count'] - low_row['stayed_count']]
+            ]
+            chi2, p_value = stats.chi2_contingency(contingency)[:2]
+            print(f"  High={high_row['stay_proportion']:.3f}, Low={low_row['stay_proportion']:.3f}, "
+                  f"χ²={chi2:.3f}, p={p_value:.4f}")
+            
+            # Add significance marker if significant
+            if p_value < 0.05:
+                bars = ax.patches
+                if len(bars) >= 2:
+                    max_height = max(b.get_height() for b in bars)
+                    bracket_height = max_height + 0.05
+                    line_height = bracket_height + 0.02
+                    x0 = bars[0].get_x() + bars[0].get_width() / 2
+                    x1 = bars[1].get_x() + bars[1].get_width() / 2
+                    ax.plot([x0, x0, x1, x1], [bracket_height, line_height, line_height, bracket_height],
+                            'k-', linewidth=1.5)
+                    sig_text = '***' if p_value < 0.001 else ('**' if p_value < 0.01 else '*')
+                    ax.text((x0 + x1) / 2, line_height + 0.01, sig_text,
+                            ha='center', va='bottom', fontsize=16, fontweight='bold')
+        
+        plt.tight_layout()
+        plt.savefig(self.figure_dir + f"/subgoal_stay_by_block_type_experiment_{self.experiment}.png",
+                    dpi=300, bbox_inches='tight')
+        plt.show()
+        
+        return results_df
 
     def plot_staying_patterns_prospective_retrospective(self):
         """
@@ -6054,7 +7384,7 @@ class PlotMeasures:
         else:
             experiment = ""
         
-        plt.suptitle(f'Goal Transition Matrices: Experiment {experiment}', fontsize=16, weight='bold')
+        plt.suptitle(f'Goal Transition Matrices', fontsize=16, weight='bold')
         plt.tight_layout(rect=[0, 0, 1, 1.05])
         
         # Save figure
@@ -6070,6 +7400,157 @@ class PlotMeasures:
             print(f"{cond}: {total_transitions} transitions")
         
         return transition_matrices
+
+    def plot_goal_transition_heatmaps_by_block_half(self):
+        """
+        Plot heatmaps of goal and subgoal transitions split by first half vs second half of blocks.
+        Collapses over all conditions and shows transition probabilities from previous goal/subgoal to current goal/subgoal.
+        Creates a 1x4 layout: goal transitions (first two subplots) and subgoal transitions (last two subplots),
+        each split by block half. Titles span pairs of subplots.
+        """
+        df = self.df.copy()
+        
+        # Replace 'BR' with 'OB' for consistency
+        df['goal_selected'] = df['goal_selected'].replace('BR', 'OB')
+        
+        # Sort by subject, block, and trial to maintain temporal order
+        df = df.sort_values(by=['subject_id', 'block_num', 'trial_num'])
+        
+        # Shift goal selections to get transitions
+        df['prev_goal'] = df.groupby(['subject_id', 'block_num'])['goal_selected'].shift(1)
+        df_goals = df.dropna(subset=['prev_goal']).copy()
+        
+        # Shift subgoal selections to get transitions
+        df['prev_subgoal'] = df.groupby(['subject_id', 'block_num'])['subgoal_selected'].shift(1)
+        df_subgoals = df.dropna(subset=['prev_subgoal']).copy()
+        
+        # Determine block half for each trial
+        # Group by subject and block to find max trial_num in each block
+        df_goals['max_trial_in_block'] = df_goals.groupby(['subject_id', 'block_num'])['trial_num'].transform('max')
+        df_goals['block_half'] = df_goals.apply(
+            lambda row: 'first_half' if row['trial_num'] <= row['max_trial_in_block'] / 2 else 'second_half',
+            axis=1
+        )
+        
+        df_subgoals['max_trial_in_block'] = df_subgoals.groupby(['subject_id', 'block_num'])['trial_num'].transform('max')
+        df_subgoals['block_half'] = df_subgoals.apply(
+            lambda row: 'first_half' if row['trial_num'] <= row['max_trial_in_block'] / 2 else 'second_half',
+            axis=1
+        )
+        
+        # Compute transition probabilities by block half (collapsing over all conditions)
+        goal_transition_matrices = {}
+        subgoal_transition_matrices = {}
+        block_halves = ['first_half', 'second_half']
+        
+        for half in block_halves:
+            # Goal transitions
+            half_df_goals = df_goals[df_goals['block_half'] == half]
+            goal_transition_counts = pd.crosstab(half_df_goals['prev_goal'], half_df_goals['goal_selected'], normalize='index')
+            goal_transition_matrices[half] = goal_transition_counts
+            
+            # Subgoal transitions
+            half_df_subgoals = df_subgoals[df_subgoals['block_half'] == half]
+            subgoal_transition_counts = pd.crosstab(half_df_subgoals['prev_subgoal'], half_df_subgoals['subgoal_selected'], normalize='index')
+            subgoal_transition_matrices[half] = subgoal_transition_counts
+        
+        # Create figure with 1x4 layout: goals (first two), subgoals (last two)
+        fig, axs = plt.subplots(1, 4, figsize=(16, 4))
+        
+        # Plot goal heatmaps (first two subplots)
+        for i, half in enumerate(block_halves):
+            sns.heatmap(
+                goal_transition_matrices[half],
+                annot=True,
+                fmt=".2f",
+                cmap="crest",
+                cbar=False,
+                linewidths=0.5,
+                linecolor='gray',
+                square=True,
+                ax=axs[i],
+                annot_kws={"size": 13, "weight": "bold"}
+            )
+            title = 'First Half of Block' if half == 'first_half' else 'Second Half of Block'
+            axs[i].set_title(title, fontsize=15, weight='bold')
+            axs[i].set_xlabel('To Goal', fontsize=14, fontweight='bold')
+            axs[i].set_ylabel('From Goal', fontsize=14, fontweight='bold')
+            axs[i].tick_params(labelsize=13)
+            
+            # Make tick labels bold
+            for label in axs[i].get_xticklabels():
+                label.set_weight('bold')
+            for label in axs[i].get_yticklabels():
+                label.set_weight('bold')
+        
+        # Plot subgoal heatmaps (last two subplots)
+        for i, half in enumerate(block_halves):
+            subplot_idx = i + 2  # Subplots 2 and 3
+            sns.heatmap(
+                subgoal_transition_matrices[half],
+                annot=True,
+                fmt=".2f",
+                cmap="viridis",
+                cbar=False,
+                linewidths=0.5,
+                linecolor='gray',
+                square=True,
+                ax=axs[subplot_idx],
+                annot_kws={"size": 13, "weight": "bold"}
+            )
+            title = 'First Half of Block' if half == 'first_half' else 'Second Half of Block'
+            axs[subplot_idx].set_title(title, fontsize=15, weight='bold')
+            axs[subplot_idx].set_xlabel('To Subgoal', fontsize=14, fontweight='bold')
+            axs[subplot_idx].set_ylabel('From Subgoal', fontsize=14, fontweight='bold')
+            axs[subplot_idx].tick_params(labelsize=13)
+            
+            # Make tick labels bold
+            for label in axs[subplot_idx].get_xticklabels():
+                label.set_weight('bold')
+            for label in axs[subplot_idx].get_yticklabels():
+                label.set_weight('bold')
+        
+        # Determine experiment number
+        if self.data_type == "online":
+            experiment = 'H2'
+        elif self.data_type == "fmri":
+            experiment = 'H1'
+        else:
+            experiment = ""
+        
+        # Add titles spanning pairs of subplots (before tight_layout)
+        # Goal Transitions title spanning first two subplots
+        fig.text(0.25, 1.01, 'Goal Transitions', ha='center', va='bottom', 
+                fontsize=16, weight='bold', transform=fig.transFigure)
+        
+        # Subgoal Transitions title spanning last two subplots
+        fig.text(0.75, 1.01, 'Subgoal Transitions', ha='center', va='bottom', 
+                fontsize=16, weight='bold', transform=fig.transFigure)
+        
+        # Adjust layout to leave space for titles at the top
+        plt.tight_layout(rect=[0, 0, 1, 0.95])
+        plt.subplots_adjust(top=0.92)
+        
+        # Save figure
+        plt.savefig(self.figure_dir + f"/goal_transition_heatmaps_by_block_half_experiment_{self.experiment}.png", 
+                   dpi=300, bbox_inches='tight')
+        plt.show()
+        
+        # Print summary statistics
+        print(f"\nGoal transition analysis by block half summary:")
+        for half in block_halves:
+            total_transitions = len(df_goals[df_goals['block_half'] == half])
+            print(f"Goals {half}: {total_transitions} transitions")
+        
+        print(f"\nSubgoal transition analysis by block half summary:")
+        for half in block_halves:
+            total_transitions = len(df_subgoals[df_subgoals['block_half'] == half])
+            print(f"Subgoals {half}: {total_transitions} transitions")
+        
+        return {
+            'goal_transitions': goal_transition_matrices,
+            'subgoal_transitions': subgoal_transition_matrices
+        }
 
     def analyze_most_viable_goal_persistence(self):
         """
@@ -6200,10 +7681,16 @@ class PlotMeasures:
         }
 
 
-    def plot_subgoal_transition_heatmaps(self):
+    def plot_subgoal_transition_heatmaps(self, condition_on_goal_stay=True):
         """
         Plot heatmaps of subgoal transitions for each condition in a single row.
         Shows transition probabilities from previous subgoal to current subgoal.
+
+        Parameters
+        ----------
+        condition_on_goal_stay : bool, default True
+            If True, only include trials where the participant stayed on the same goal
+            (goal_selected == prev_goal). If False, use all trials (unconditional).
         """
         df = self.df.copy()
         
@@ -6213,9 +7700,14 @@ class PlotMeasures:
         # Sort by subject, block, and trial to maintain temporal order
         df = df.sort_values(by=['subject_id', 'block_num', 'trial_num'])
         
-        # Shift subgoal selections to get transitions
+        # Shift goal and subgoal selections to get transitions
+        df['prev_goal'] = df.groupby(['subject_id', 'block_num'])['goal_selected'].shift(1)
         df['prev_subgoal'] = df.groupby(['subject_id', 'block_num'])['subgoal_selected'].shift(1)
         df = df.dropna(subset=['prev_subgoal'])
+        
+        # Optionally restrict to goal-stay trials only
+        if condition_on_goal_stay:
+            df = df[df['goal_selected'] == df['prev_goal']].copy()
         
         # Define string labels for block types 0 to 5
         block_labels = {
@@ -6276,22 +7768,111 @@ class PlotMeasures:
         else:
             experiment = ""
         
-        plt.suptitle(f'Subgoal Transition Matrices: Experiment {experiment}', fontsize=16, weight='bold')
+        title_suffix = " (Given Goal Stay)" if condition_on_goal_stay else ""
+        plt.suptitle(f'Subgoal Transition Matrices{title_suffix}: Experiment {experiment}', fontsize=16, weight='bold')
         plt.tight_layout(rect=[0, 0, 1, 1.05])
         
         # Save figure
-        plt.savefig(self.figure_dir + f"/subgoal_transition_heatmaps_experiment_{self.experiment}.png", 
+        suffix = "_goal_stay" if condition_on_goal_stay else ""
+        plt.savefig(self.figure_dir + f"/subgoal_transition_heatmaps_experiment_{self.experiment}{suffix}.png", 
                    dpi=300, bbox_inches='tight')
         plt.show()
         
         # Print summary statistics
-        print(f"\nSubgoal transition analysis summary:")
+        print(f"\nSubgoal transition analysis summary{' (conditioned on goal stay)' if condition_on_goal_stay else ''}:")
         print(f"Number of conditions: {len(conditions)}")
         for cond in conditions:
             total_transitions = len(df[df['block_condition'] == cond])
             print(f"{cond}: {total_transitions} transitions")
         
         return transition_matrices
+
+    def plot_subgoal_transition_heatmaps_by_block_half(self, condition_on_goal_stay=True):
+        """
+        Plot heatmaps of subgoal transitions split by first vs second half of block.
+        Collapses over all conditions (like plot_goal_transition_heatmaps_by_block_half).
+        By default restricted to goal-stay trials only.
+
+        Parameters
+        ----------
+        condition_on_goal_stay : bool, default True
+            If True, only include trials where the participant stayed on the same goal.
+        """
+        df = self.df.copy()
+
+        df['goal_selected'] = df['goal_selected'].replace('BR', 'OB')
+        df = df.sort_values(by=['subject_id', 'block_num', 'trial_num'])
+
+        df['prev_goal'] = df.groupby(['subject_id', 'block_num'])['goal_selected'].shift(1)
+        df['prev_subgoal'] = df.groupby(['subject_id', 'block_num'])['subgoal_selected'].shift(1)
+        df = df.dropna(subset=['prev_subgoal'])
+
+        if condition_on_goal_stay:
+            df = df[df['goal_selected'] == df['prev_goal']].copy()
+
+        # Block half: trial_num <= max/2 -> first_half, else second_half
+        df['max_trial_in_block'] = df.groupby(['subject_id', 'block_num'])['trial_num'].transform('max')
+        df['block_half'] = df.apply(
+            lambda row: 'first_half' if row['trial_num'] <= row['max_trial_in_block'] / 2 else 'second_half',
+            axis=1
+        )
+
+        block_halves = ['first_half', 'second_half']
+        subgoal_transition_matrices = {}
+        for half in block_halves:
+            half_df = df[df['block_half'] == half]
+            subgoal_transition_counts = pd.crosstab(
+                half_df['prev_subgoal'], half_df['subgoal_selected'], normalize='index'
+            )
+            subgoal_transition_matrices[half] = subgoal_transition_counts
+
+        # 1x2 layout: First Half, Second Half (like subgoal part of goal_transition_heatmaps_by_block_half)
+        fig, axs = plt.subplots(1, 2, figsize=(8, 4))
+
+        for i, half in enumerate(block_halves):
+            sns.heatmap(
+                subgoal_transition_matrices[half],
+                annot=True,
+                fmt=".2f",
+                cmap="viridis",
+                cbar=False,
+                linewidths=0.5,
+                linecolor='gray',
+                square=True,
+                ax=axs[i],
+                annot_kws={"size": 13, "weight": "bold"}
+            )
+            title = 'First Half of Block' if half == 'first_half' else 'Second Half of Block'
+            axs[i].set_title(title, fontsize=15, weight='bold')
+            axs[i].set_xlabel('To Subgoal', fontsize=14, fontweight='bold')
+            axs[i].set_ylabel('From Subgoal', fontsize=14, fontweight='bold')
+            axs[i].tick_params(labelsize=13)
+            for label in axs[i].get_xticklabels():
+                label.set_weight('bold')
+            for label in axs[i].get_yticklabels():
+                label.set_weight('bold')
+
+        if self.data_type == "online":
+            experiment = 'H2'
+        elif self.data_type == "fmri":
+            experiment = 'H1'
+        else:
+            experiment = ""
+        title_suffix = " (Goal Stay Only)" if condition_on_goal_stay else ""
+        plt.suptitle(f'Subgoal Transitions',
+                    fontsize=16, weight='bold')
+        plt.tight_layout(rect=[0, 0, 1, 1.05])
+
+        suffix = "_goal_stay" if condition_on_goal_stay else ""
+        plt.savefig(self.figure_dir + f"/subgoal_transition_heatmaps_by_block_half_experiment_{self.experiment}{suffix}.png",
+                   dpi=300, bbox_inches='tight')
+        plt.show()
+
+        print(f"\nSubgoal transition by block half{' (conditioned on goal stay)' if condition_on_goal_stay else ''}:")
+        for half in block_halves:
+            total_transitions = len(df[df['block_half'] == half])
+            print(f"  {half}: {total_transitions} transitions")
+        return subgoal_transition_matrices
 
     def analyze_subgoal_switching_relevance_to_dominant_goal(self):
         """
@@ -6491,6 +8072,8 @@ class PlotMeasures:
 if __name__ == "__main__":
     plot_measures = PlotMeasures(data_type="online", read_from_csv=True)
 
+    plot_measures.plot_goal_action_congruence_histogram(experiment=0)
+
     # Example usage of the new switching characteristics method
     # plot_measures.plot_switching_characteristics(goal_type="goal")
     
@@ -6500,21 +8083,30 @@ if __name__ == "__main__":
     
 
     # # Plot stay proportions with progress
-    # plot_measures.plot_stay_proportion_with_progress()
-    # plot_measures.plot_stay_proportion_with_progress_subgoals()
+    #plot_measures.plot_stay_proportion_with_progress()
+    #plot_measures.plot_stay_proportion_with_progress_subgoals()
+    #plot_measures.plot_stay_proportion_with_progress_simulated(model_name="resources")
+    #plot_measures.plot_stay_proportion_with_progress_subgoals_simulated(model_name="resources")
+    #plot_measures.plot_stay_proportion_with_progress_subgoals_by_condition()
+    #plot_measures.plot_stay_proportion_with_progress_goals_by_condition()
+    #plot_measures.plot_goal_stay_by_block_type()
+    #plot_measures.plot_subgoal_stay_by_block_type()
 
     
+    #plot_measures.plot_goal_selection_related_goal_progress(simulate=True, model_name="momentum_with_softmax", collapse_over_goals=False)
+    #plot_measures.plot_subgoal_selection_related_subgoal_progress(simulate=False, model_name="resources", collapse_conditions=False, collapse_over_subgoals=False)
+
     #plot_measures.plot_goal_selection_related_goal_progress(simulate=False, model_name="momentum_learn_alt_goal", collapse_over_goals=True)
     #plot_measures.plot_subgoal_selection_related_subgoal_progress(simulate=False, collapse_conditions=False, collapse_over_subgoals=False)
     
     
     # Example usage of the four models comparison
     # plot_measures.plot_goal_selection_related_goal_progress_four_models(models=['momentum_learn_alt_goal', 'prospective', 'td_persistence'], 
-    #                                                                   include_behavior=True, collapse_over_goals=False)
+    #                                                                   include_behavior=True, collapse_over_goals=True)
     
     # ### Example usage of the four models comparison for subgoals
-    # plot_measures.plot_subgoal_selection_related_subgoal_progress_four_models(models=['momentum_learn_alt_goal', 'prospective', 'td_persistence'], 
-    #                                                                           include_behavior=True, collapse_over_subgoals=False)
+    #plot_measures.plot_subgoal_selection_related_subgoal_progress_four_models(models=['momentum_learn_alt_goal', 'prospective', 'td_persistence'], 
+     #                                                                         include_behavior=True, collapse_over_subgoals=False)
 
 
 
@@ -6529,6 +8121,8 @@ if __name__ == "__main__":
     # print("="*60)
     # plot_measures.analyze_most_viable_goal_persistence()
     
-    plot_measures.plot_goal_transition_heatmaps()
-    plot_measures.plot_subgoal_transition_heatmaps()
+    #plot_measures.plot_goal_transition_heatmaps()
+    #plot_measures.plot_goal_transition_heatmaps_by_block_half()
+    #plot_measures.plot_subgoal_transition_heatmaps()
+    #plot_measures.plot_subgoal_transition_heatmaps_by_block_half()
     #plot_measures.analyze_subgoal_switching_relevance_to_dominant_goal()

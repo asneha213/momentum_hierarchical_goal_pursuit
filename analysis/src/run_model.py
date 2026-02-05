@@ -7,9 +7,13 @@ from models.prospective import Prospective
 from models.prospective_exp import ProspectiveExp
 from models.momentum import Momentum
 from models.td_persistence import TDPersistence
-
+from models.retrospective import Retrospective
+from models.resources import Resources
+from models.resources_depth import ResourcesDepth
+from models.progress import Progress
 from models.momentum_with_pers_subgoal import MomentumWithPersSubgoal
 from models.momentum_with_pros_subgoal import MomentumWithProsSubgoal
+from models.momentum_with_softmax import MomentumWithSoftmax
 
 
 from measures import *
@@ -31,6 +35,14 @@ def get_model(model_name, params):
         return Prospective(params)
     elif model_name == "prospective_exp":
         return ProspectiveExp(params)
+    elif model_name == "retrospective":
+        return Retrospective(params)
+    elif model_name == "resources":
+        return Resources(params)
+    elif model_name == "resources_depth":
+        return ResourcesDepth(params)
+    elif model_name == "progress":
+        return Progress(params)
     elif model_name == "momentum":
         return Momentum(params, learn_alt_goal=False)
     elif model_name == "momentum_learn_alt_goal":
@@ -39,6 +51,8 @@ def get_model(model_name, params):
         return MomentumWithPersSubgoal(params, learn_alt_goal=True)
     elif model_name == "momentum_with_pros_subgoal":
         return MomentumWithProsSubgoal(params, learn_alt_goal=True)
+    elif model_name == "momentum_with_softmax":
+        return MomentumWithSoftmax(params, learn_alt_goal=True)
     elif model_name == "td_persistence":
         return TDPersistence(params)
 
