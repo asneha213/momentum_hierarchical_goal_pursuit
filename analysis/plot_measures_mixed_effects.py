@@ -16,9 +16,180 @@ class PlotMeasuresMixedEffects(PlotMeasures):
 
 
     @staticmethod
-    def plot_forest_plot_experiment_h2_only():
+    def _draw_forest_panel(ax, result, title, xlabel, coef_fmt='.1f', show_ylabels=True):
+        """Draw a forest plot panel onto the given axes."""
+        y_positions = np.array([0.5, 1.5])
+
+        coefs = result['coefs']
+        ci_lower = result['ci_lower']
+        ci_upper = result['ci_upper']
+        p_values = result['p_values']
+        regressor_corr = result['regressor_corr']
+
+        y_min = min(ci_lower) - (max(ci_upper) - min(ci_lower)) * 0.1
+        y_max = max(ci_upper) + (max(ci_upper) - min(ci_lower)) * 0.1
+
+        for j, (low, high) in enumerate(zip(ci_lower, ci_upper)):
+            ax.plot([low, high], [y_positions[j], y_positions[j]], 'k-', linewidth=3, alpha=0.8)
+
+        colors = ['red' if p < 0.05 else 'gray' for p in p_values]
+        sizes = [100 if p < 0.05 else 60 for p in p_values]
+
+        ax.scatter(coefs, y_positions, c=colors, s=sizes,
+                   zorder=5, alpha=0.8, edgecolors='black', linewidth=1)
+
+        ax.axvline(x=0, color='black', linestyle='--', alpha=0.5, linewidth=1)
+
+        ax.set_yticks(y_positions)
+        wrapped_labels = ['Switching\nCosts', 'Momentum\nAdvantage']
+        if show_ylabels:
+            ax.set_yticklabels(wrapped_labels, fontsize=20, fontweight='bold')
+        else:
+            ax.set_yticklabels([])
+        ax.set_ylim(-0.5, 2.5)
+        ax.set_xlim(y_min, y_max)
+        ax.set_title(title, fontsize=20, fontweight='bold')
+        ax.tick_params(axis='x', labelsize=16)
+        ax.grid(True, alpha=0.3, axis='x')
+
+        for j, (coef, p_val, ci_low, ci_high) in enumerate(zip(coefs, p_values, ci_lower, ci_upper)):
+            if p_val < 0.001:
+                sig_star = '***'
+            elif p_val < 0.01:
+                sig_star = '**'
+            elif p_val < 0.05:
+                sig_star = '*'
+            else:
+                sig_star = 'ns'
+
+            x_pos = y_max - (y_max - y_min) * 0.15
+
+            ax.text(x_pos, y_positions[j] + 0.1, f'β = {coef:{coef_fmt}}',
+                    fontsize=18, va='center', fontweight='bold')
+            ax.text(x_pos, y_positions[j] - 0.1, f'[{ci_low:{coef_fmt}}, {ci_high:{coef_fmt}}]',
+                    fontsize=16, va='center', style='italic')
+
+            if p_val < 0.001:
+                p_text = 'p < 0.001'
+            else:
+                p_text = f'p = {p_val:.3f}'
+
+            ax.text(x_pos, y_positions[j] - 0.3, f'{p_text} {sig_star}',
+                    fontsize=17, va='center',
+                    color='red' if p_val < 0.05 else 'black',
+                    fontweight='bold' if p_val < 0.05 else 'normal')
+
+        ax.text(0.02, 0.1, f'n = {result["n_subjects"]}, r = {regressor_corr:.3f}',
+                transform=ax.transAxes, fontsize=18, weight='bold',
+                verticalalignment='bottom', horizontalalignment='left')
+
+        ax.set_xlabel(xlabel, fontsize=18, fontweight='bold')
+
+    @staticmethod
+    def _fit_rt_mixed_effects_h2(df):
+        """Fit mixed effects model for goal RT in experiment H2."""
+        if 'probe_rt' in df.columns:
+            rt_column = 'probe_rt'
+        elif 'goal_rt' in df.columns:
+            rt_column = 'goal_rt'
+        else:
+            print(f"Warning: No RT column found for experiment H2")
+            return None
+
+        df_model = df.dropna(subset=[
+            rt_column, 'chosen_goal_perseveration', 'chosen_goal_value', 'subject_id',
+            'chosen_subgoal_value', 'chosen_subgoal_perseveration', 'switching_costs', 'momentum_advantage'
+        ]).copy()
+
+        if len(df_model) == 0:
+            print(f"Warning: No valid data for experiment H2")
+            return None
+
+        df_model['goal_rt'] = df_model[rt_column]
+        df_model['subgoal_momentum_z'] = (df_model['chosen_subgoal_value'] - df_model['chosen_subgoal_value'].mean()) / df_model['chosen_subgoal_value'].std()
+        df_model['subgoal_perseveration_z'] = (df_model['chosen_subgoal_perseveration'] - df_model['chosen_subgoal_perseveration'].mean()) / df_model['chosen_subgoal_perseveration'].std()
+        df_model['goal_perseveration_z'] = (df_model['switching_costs'] - df_model['switching_costs'].mean()) / df_model['switching_costs'].std()
+        df_model['goal_momentum_z'] = (df_model['momentum_advantage'] - df_model['momentum_advantage'].mean()) / df_model['momentum_advantage'].std()
+        regressor_corr = df_model['goal_perseveration_z'].corr(df_model['goal_momentum_z'])
+
+        try:
+            model = smf.mixedlm("goal_rt ~ goal_perseveration_z + goal_momentum_z ", df_model, groups=df_model["subject_id"])
+            result = model.fit()
+
+            predictors = ['goal_perseveration_z', 'goal_momentum_z']
+            predictor_labels = ['Goal Perseveration', 'Goal Momentum']
+
+            coefs = [result.params[pred] for pred in predictors]
+            ci_lower = [result.conf_int().loc[pred, 0] for pred in predictors]
+            ci_upper = [result.conf_int().loc[pred, 1] for pred in predictors]
+            t_stats = [result.params[pred] / result.bse[pred] for pred in predictors]
+            p_values = [2 * (1 - stats.t.cdf(abs(t), result.df_resid)) for t in t_stats]
+
+            return {
+                'coefs': coefs,
+                'ci_lower': ci_lower,
+                'ci_upper': ci_upper,
+                'p_values': p_values,
+                'regressor_corr': regressor_corr,
+                'predictor_labels': predictor_labels,
+                'n_subjects': df_model['subject_id'].nunique(),
+                'n_trials': len(df_model)
+            }
+        except Exception as e:
+            print(f"Error fitting model for H2: {e}")
+            return None
+
+    @staticmethod
+    def _fit_goal_choice_mixed_effects_h2(df):
+        """Fit logistic regression for goal choice in experiment H2."""
+        df_model = df.dropna(subset=[
+            'goal_rt', 'chosen_goal_perseveration', 'chosen_goal_value', 'subject_id',
+            'chosen_subgoal_value', 'chosen_subgoal_perseveration', 'switching_costs', 'momentum_advantage'
+        ]).copy()
+
+        if len(df_model) == 0:
+            print(f"Warning: No valid data for experiment H2 goal choice")
+            return None
+
+        df_model['goal_switch_binary'] = (df_model['goal_switch'] == 1).astype(int)
+        df_model['goal_perseveration_z'] = (df_model['switching_costs'] - df_model['switching_costs'].mean()) / df_model['switching_costs'].std()
+        df_model['goal_momentum_z'] = (df_model['momentum_advantage'] - df_model['momentum_advantage'].mean()) / df_model['momentum_advantage'].std()
+        regressor_corr = df_model['goal_perseveration_z'].corr(df_model['goal_momentum_z'])
+
+        try:
+            # Figure 9A choice panel uses pooled logistic regression; despite
+            # this module name, only the RT panel fits subject random intercepts.
+            model = smf.logit("goal_switch_binary ~ goal_perseveration_z + goal_momentum_z", df_model)
+            result = model.fit()
+
+            predictors = ['goal_perseveration_z', 'goal_momentum_z']
+            predictor_labels = ['Goal Perseveration', 'Goal Momentum']
+
+            coefs = [result.params[pred] for pred in predictors]
+            ci_lower = [result.conf_int().loc[pred, 0] for pred in predictors]
+            ci_upper = [result.conf_int().loc[pred, 1] for pred in predictors]
+            z_stats = [result.params[pred] / result.bse[pred] for pred in predictors]
+            p_values = [2 * (1 - stats.norm.cdf(abs(z))) for z in z_stats]
+
+            return {
+                'coefs': coefs,
+                'ci_lower': ci_lower,
+                'ci_upper': ci_upper,
+                'p_values': p_values,
+                'regressor_corr': regressor_corr,
+                'predictor_labels': predictor_labels,
+                'n_subjects': df_model['subject_id'].nunique(),
+                'n_trials': len(df_model)
+            }
+        except Exception as e:
+            print(f"Error fitting goal choice model for H2: {e}")
+            return None
+
+    @staticmethod
+    def plot_forest_plot_experiment_h2_only(ax=None, save=True, show=True):
         """
-        Create forest plot for experiment H2 only
+        Create forest plot for experiment H2 only.
+        If ax is provided, draw onto that axes (for combined figures).
         """
         import os
         import pandas as pd
@@ -34,170 +205,35 @@ class PlotMeasuresMixedEffects(PlotMeasures):
         df = pd.read_csv(file_path)
         print(f"Loaded H2: {len(df)} rows")
         
-        def fit_mixed_effects_model_h2(df):
-            """Fit mixed effects model for experiment H2"""
-            # Check which RT column to use
-            if 'probe_rt' in df.columns:
-                rt_column = 'probe_rt'
-            elif 'goal_rt' in df.columns:
-                rt_column = 'goal_rt'
-            else:
-                print(f"Warning: No RT column found for experiment H2")
-                return None
-
-            # df['chosen_goal_perseveration'] = df['chosen_subgoal_perseveration']
-            # df['chosen_goal_value'] = df['chosen_subgoal_value']
-            #df['goal_rt'] = df['subgoal_rt']
-                
-            df_model = df.dropna(subset=[
-                rt_column, 'chosen_goal_perseveration', 'chosen_goal_value', 'subject_id', 'chosen_subgoal_value', 'chosen_subgoal_perseveration', 'switching_costs', 'momentum_advantage'
-            ]).copy()
-            
-            if len(df_model) == 0:
-                print(f"Warning: No valid data for experiment H2")
-                return None
-                
-            # Rename RT column to 'goal_rt' for consistency
-            df_model['goal_rt'] = df_model[rt_column]
-                
-            # Standardize variables
-            # df_model['goal_perseveration_z'] = (df_model['chosen_goal_perseveration'] - df_model['chosen_goal_perseveration'].mean()) / df_model['chosen_goal_perseveration'].std()
-            # df_model['goal_momentum_z'] = (df_model['chosen_goal_value'] - df_model['chosen_goal_value'].mean()) / df_model['chosen_goal_value'].std()
-
-            df_model['subgoal_momentum_z'] = (df_model['chosen_subgoal_value'] - df_model['chosen_subgoal_value'].mean()) / df_model['chosen_subgoal_value'].std()
-            df_model['subgoal_perseveration_z'] = (df_model['chosen_subgoal_perseveration'] - df_model['chosen_subgoal_perseveration'].mean()) / df_model['chosen_subgoal_perseveration'].std()
-            df_model['goal_perseveration_z'] = (df_model['switching_costs'] - df_model['switching_costs'].mean()) / df_model['switching_costs'].std()
-            df_model['goal_momentum_z'] = (df_model['momentum_advantage'] - df_model['momentum_advantage'].mean()) / df_model['momentum_advantage'].std()
-            # Calculate regressor correlation
-            regressor_corr = df_model['goal_perseveration_z'].corr(df_model['goal_momentum_z'])
-            
-            # Fit mixed-effects model
-            try:
-                #model = smf.mixedlm("goal_rt ~ goal_perseveration_z + goal_momentum_z", df_model, groups=df_model["subject_id"])
-                model = smf.mixedlm("goal_rt ~ goal_perseveration_z + goal_momentum_z ", df_model, groups=df_model["subject_id"])
-                result = model.fit()
-                
-                # Extract results
-                predictors = ['goal_perseveration_z', 'goal_momentum_z']
-                predictor_labels = ['Goal Perseveration', 'Goal Momentum']
-                
-                coefs = [result.params[pred] for pred in predictors]
-                ci_lower = [result.conf_int().loc[pred, 0] for pred in predictors]
-                ci_upper = [result.conf_int().loc[pred, 1] for pred in predictors]
-                std_errors = [result.bse[pred] for pred in predictors]
-                t_stats = [result.params[pred] / result.bse[pred] for pred in predictors]
-                p_values = [2 * (1 - stats.t.cdf(abs(t), result.df_resid)) for t in t_stats]
-                
-                return {
-                    'coefs': coefs,
-                    'ci_lower': ci_lower,
-                    'ci_upper': ci_upper,
-                    'p_values': p_values,
-                    'regressor_corr': regressor_corr,
-                    'predictor_labels': predictor_labels,
-                    'n_subjects': df_model['subject_id'].nunique(),
-                    'n_trials': len(df_model)
-                }
-            except Exception as e:
-                print(f"Error fitting model for H2: {e}")
-                return None
-        
-        # Fit model for H2
-        result = fit_mixed_effects_model_h2(df)
+        result = PlotMeasuresMixedEffects._fit_rt_mixed_effects_h2(df)
         
         if result is None:
             print("No valid results for experiment H2")
             return None
         
-        # Create figure with single subplot
-        fig, ax = plt.subplots(1, 1, figsize=(8, 6))
+        fig = None
+        if ax is None:
+            fig, ax = plt.subplots(1, 1, figsize=(8, 6))
+
+        PlotMeasuresMixedEffects._draw_forest_panel(
+            ax, result, title='Goal Reaction Time', xlabel='Effect Size (ms)', coef_fmt='.1f'
+        )
+
+        if fig is not None:
+            plt.tight_layout()
+            if save:
+                plt.savefig(FIGURES_TOPICS + "/forest_plot_experiment_h2_only.png", dpi=300, bbox_inches='tight')
+            if show:
+                plt.show()
         
-        # Set up y positions for the two variables
-        y_positions = np.array([0.5, 1.5])
-        
+        # Print summary statistics
         coefs = result['coefs']
         ci_lower = result['ci_lower']
         ci_upper = result['ci_upper']
         p_values = result['p_values']
         regressor_corr = result['regressor_corr']
         predictor_labels = result['predictor_labels']
-        
-        # Find y-axis limits
-        y_min = min(ci_lower) - (max(ci_upper) - min(ci_lower)) * 0.1
-        y_max = max(ci_upper) + (max(ci_upper) - min(ci_lower)) * 0.1
-        
-        # Plot confidence intervals as horizontal lines
-        for j, (low, high) in enumerate(zip(ci_lower, ci_upper)):
-            ax.plot([low, high], [y_positions[j], y_positions[j]], 'k-', linewidth=3, alpha=0.8)
-        
-        # Plot point estimates as circles, colored by significance
-        colors = ['red' if p < 0.05 else 'gray' for p in p_values]
-        sizes = [100 if p < 0.05 else 60 for p in p_values]
-        
-        ax.scatter(coefs, y_positions, c=colors, s=sizes, 
-                  zorder=5, alpha=0.8, edgecolors='black', linewidth=1)
-        
-        # Add vertical line at zero
-        ax.axvline(x=0, color='black', linestyle='--', alpha=0.5, linewidth=1)
-        
-        # Customize axes
-        ax.set_yticks(y_positions)
-        #wrapped_labels = ['Goal\nPerseveration', 'Goal\nMomentum']
-        wrapped_labels = ['Switching\nCosts', 'Momentum\nAdvantage']
-        ax.set_yticklabels(wrapped_labels, fontsize=20, fontweight='bold')
-        ax.set_ylim(-0.5, 2.5)
-        ax.set_xlim(y_min, y_max)
-        ax.set_title('Goal Reaction Time', fontsize=20, fontweight='bold')
-        ax.tick_params(axis='x', labelsize=16)
-        ax.grid(True, alpha=0.3, axis='x')
-        
-        # Add effect size and p-value annotations
-        for j, (coef, p_val, ci_low, ci_high) in enumerate(zip(coefs, p_values, ci_lower, ci_upper)):
-            # Determine significance stars
-            if p_val < 0.001:
-                sig_star = '***'
-            elif p_val < 0.01:
-                sig_star = '**'
-            elif p_val < 0.05:
-                sig_star = '*'
-            else:
-                sig_star = 'ns'
-            
-            # Position text to the right of the plot
-            x_pos = y_max - (y_max - y_min) * 0.15
-            
-            # Add coefficient and CI text
-            ax.text(x_pos, y_positions[j] + 0.1, f'β = {coef:.1f}', 
-                    fontsize=18, va='center', fontweight='bold')
-            ax.text(x_pos, y_positions[j] - 0.1, f'[{ci_low:.1f}, {ci_high:.1f}]', 
-                    fontsize=16, va='center', style='italic')
-            
-            # Format p-value properly
-            if p_val < 0.001:
-                p_text = 'p < 0.001'
-            else:
-                p_text = f'p = {p_val:.3f}'
-            
-            ax.text(x_pos, y_positions[j] - 0.3, f'{p_text} {sig_star}', 
-                    fontsize=17, va='center', 
-                    color='red' if p_val < 0.05 else 'black',
-                    fontweight='bold' if p_val < 0.05 else 'normal')
-        
-        # Add sample size and correlation information
-        ax.text(0.02, 0.1, f'n = {result["n_subjects"]}, r = {regressor_corr:.3f}', 
-                transform=ax.transAxes, fontsize=18, weight='bold',
-                verticalalignment='bottom', horizontalalignment='left')
-        
-        # Add overall x-axis label
-        ax.set_xlabel('Effect Size (ms)', fontsize=18, fontweight='bold')
-        
-        plt.tight_layout()
-        
-        # Save the plot
-        plt.savefig(FIGURES_TOPICS + "/forest_plot_experiment_h2_only.png", dpi=300, bbox_inches='tight')
-        plt.show()
-        
-        # Print summary statistics
+
         print(f"\n{'='*80}")
         print(f"EXPERIMENT H2 MIXED EFFECTS MODEL RESULTS")
         print(f"{'='*80}")
@@ -223,8 +259,11 @@ class PlotMeasuresMixedEffects(PlotMeasures):
             
             print(f"{pred:<20} {coef:<12.1f} [{ci_low:.1f}, {ci_high:.1f}] {p_display:<12} {sig_star:<6}")
         
-        return fig
+        return fig if fig is not None else result
 
+    # final-final manuscript: Figure 9B.
+    # 9B: forest_plot_goal_rt_switch_vs_stay.png
+    # See analysis/README.md and reproduce_figures.py for inputs and panel aliases.
     @staticmethod
     def plot_forest_plot_goal_rt_switch_vs_stay():
         """
@@ -536,17 +575,14 @@ class PlotMeasuresMixedEffects(PlotMeasures):
         return fig
 
 
-    def plot_forest_plot_goal_choice_experiment_h2_only():
+    @staticmethod
+    def plot_forest_plot_goal_choice_experiment_h2_only(ax=None, save=True, show=True):
         """
-        Create forest plot for goal choice analysis in experiment H2 only
+        Create forest plot for goal choice analysis in experiment H2 only.
+        If ax is provided, draw onto that axes (for combined figures).
         """
         import os
         import pandas as pd
-        import numpy as np
-        import matplotlib.pyplot as plt
-        import seaborn as sns
-        import statsmodels.formula.api as smf
-        from scipy import stats
         
         # Define experiment H2 CSV file
         file_path = CACHE_DIR + 'all_subjects_model_parameters_online.csv'
@@ -559,156 +595,35 @@ class PlotMeasuresMixedEffects(PlotMeasures):
         df = pd.read_csv(file_path)
         print(f"Loaded H2: {len(df)} rows")
         
-        def fit_goal_choice_mixed_effects_model_h2(df):
-            """Fit mixed effects model for goal choice in experiment H2"""
-            
-            # Filter data for goal choice analysis (same as RT function)
-            df_model = df.dropna(subset=[
-                'goal_rt', 'chosen_goal_perseveration', 'chosen_goal_value', 'subject_id', 'chosen_subgoal_value', 'chosen_subgoal_perseveration', 'switching_costs', 'momentum_advantage'
-            ]).copy()
-            
-            if len(df_model) == 0:
-                print(f"Warning: No valid data for experiment H2 goal choice")
-                return None
-                
-            # Create binary outcome: 1 if goal switch, 0 if goal stay
-            df_model['goal_switch_binary'] = (df_model['goal_switch'] == 1).astype(int)
-            
-            # Standardize variables
-            #df_model['goal_perseveration_z'] = (df_model['chosen_goal_perseveration'] - df_model['chosen_goal_perseveration'].mean()) / df_model['chosen_goal_perseveration'].std()
-            # df_model['goal_momentum_z'] = (df_model['chosen_goal_value'] - df_model['chosen_goal_value'].mean()) / df_model['chosen_goal_value'].std()
-            
-            df_model['goal_perseveration_z'] = (df_model['switching_costs'] - df_model['switching_costs'].mean()) / df_model['switching_costs'].std()
-            df_model['goal_momentum_z'] = (df_model['momentum_advantage'] - df_model['momentum_advantage'].mean()) / df_model['momentum_advantage'].std()
-            # Calculate regressor correlation
-            regressor_corr = df_model['goal_perseveration_z'].corr(df_model['goal_momentum_z'])
-            
-            # Fit logistic regression model
-            try:
-                model = smf.logit("goal_switch_binary ~ goal_perseveration_z + goal_momentum_z", df_model)
-                result = model.fit()
-                
-                # Extract results
-                predictors = ['goal_perseveration_z', 'goal_momentum_z']
-                predictor_labels = ['Goal Perseveration', 'Goal Momentum']
-                
-                coefs = [result.params[pred] for pred in predictors]
-                ci_lower = [result.conf_int().loc[pred, 0] for pred in predictors]
-                ci_upper = [result.conf_int().loc[pred, 1] for pred in predictors]
-                std_errors = [result.bse[pred] for pred in predictors]
-                z_stats = [result.params[pred] / result.bse[pred] for pred in predictors]
-                p_values = [2 * (1 - stats.norm.cdf(abs(z))) for z in z_stats]
-                
-                return {
-                    'coefs': coefs,
-                    'ci_lower': ci_lower,
-                    'ci_upper': ci_upper,
-                    'p_values': p_values,
-                    'regressor_corr': regressor_corr,
-                    'predictor_labels': predictor_labels,
-                    'n_subjects': df_model['subject_id'].nunique(),
-                    'n_trials': len(df_model)
-                }
-            except Exception as e:
-                print(f"Error fitting goal choice model for H2: {e}")
-                return None
-        
-        # Fit model for H2
-        result = fit_goal_choice_mixed_effects_model_h2(df)
+        result = PlotMeasuresMixedEffects._fit_goal_choice_mixed_effects_h2(df)
         
         if result is None:
             print("No valid results for experiment H2 goal choice")
             return None
         
-        # Create figure with single subplot
-        fig, ax = plt.subplots(1, 1, figsize=(8, 6))
+        fig = None
+        if ax is None:
+            fig, ax = plt.subplots(1, 1, figsize=(8, 6))
+
+        PlotMeasuresMixedEffects._draw_forest_panel(
+            ax, result, title='Goal Switch Choice', xlabel='Log Odds Ratio', coef_fmt='.2f'
+        )
+
+        if fig is not None:
+            plt.tight_layout()
+            if save:
+                plt.savefig(FIGURES_TOPICS + "/forest_plot_goal_choice_experiment_h2_only.png", dpi=300, bbox_inches='tight')
+            if show:
+                plt.show()
         
-        # Set up y positions for the two variables
-        y_positions = np.array([0.5, 1.5])
-        
+        # Print summary statistics
         coefs = result['coefs']
         ci_lower = result['ci_lower']
         ci_upper = result['ci_upper']
         p_values = result['p_values']
         regressor_corr = result['regressor_corr']
         predictor_labels = result['predictor_labels']
-        
-        # Find y-axis limits
-        y_min = min(ci_lower) - (max(ci_upper) - min(ci_lower)) * 0.1
-        y_max = max(ci_upper) + (max(ci_upper) - min(ci_lower)) * 0.1
-        
-        # Plot confidence intervals as horizontal lines
-        for j, (low, high) in enumerate(zip(ci_lower, ci_upper)):
-            ax.plot([low, high], [y_positions[j], y_positions[j]], 'k-', linewidth=3, alpha=0.8)
-        
-        # Plot point estimates as circles, colored by significance
-        colors = ['red' if p < 0.05 else 'gray' for p in p_values]
-        sizes = [100 if p < 0.05 else 60 for p in p_values]
-        
-        ax.scatter(coefs, y_positions, c=colors, s=sizes, 
-                  zorder=5, alpha=0.8, edgecolors='black', linewidth=1)
-        
-        # Add vertical line at zero
-        ax.axvline(x=0, color='black', linestyle='--', alpha=0.5, linewidth=1)
-        
-        # Customize axes
-        ax.set_yticks(y_positions)
-        wrapped_labels = ['Switching\nCosts', 'Momentum\nAdvantage']
 
-        ax.set_yticklabels(wrapped_labels, fontsize=20, fontweight='bold')
-        ax.set_ylim(-0.5, 2.5)
-        ax.set_xlim(y_min, y_max)
-        ax.set_title('Goal Switch Choice', fontsize=20, fontweight='bold')
-        ax.tick_params(axis='x', labelsize=16)
-        ax.grid(True, alpha=0.3, axis='x')
-        
-        # Add effect size and p-value annotations
-        for j, (coef, p_val, ci_low, ci_high) in enumerate(zip(coefs, p_values, ci_lower, ci_upper)):
-            # Determine significance stars
-            if p_val < 0.001:
-                sig_star = '***'
-            elif p_val < 0.01:
-                sig_star = '**'
-            elif p_val < 0.05:
-                sig_star = '*'
-            else:
-                sig_star = 'ns'
-            
-            # Position text to the right of the plot
-            x_pos = y_max - (y_max - y_min) * 0.15
-            
-            # Add coefficient and CI text
-            ax.text(x_pos, y_positions[j] + 0.1, f'β = {coef:.2f}', 
-                    fontsize=18, va='center', fontweight='bold')
-            ax.text(x_pos, y_positions[j] - 0.1, f'[{ci_low:.2f}, {ci_high:.2f}]', 
-                    fontsize=16, va='center', style='italic')
-            
-            # Format p-value properly
-            if p_val < 0.001:
-                p_text = 'p < 0.001'
-            else:
-                p_text = f'p = {p_val:.3f}'
-            
-            ax.text(x_pos, y_positions[j] - 0.3, f'{p_text} {sig_star}', 
-                    fontsize=17, va='center', 
-                    color='red' if p_val < 0.05 else 'black',
-                    fontweight='bold' if p_val < 0.05 else 'normal')
-        
-        # Add sample size and correlation information
-        ax.text(0.02, 0.1, f'n = {result["n_subjects"]}, r = {regressor_corr:.3f}', 
-                transform=ax.transAxes, fontsize=18, weight='bold',
-                verticalalignment='bottom', horizontalalignment='left')
-        
-        # Add overall x-axis label
-        ax.set_xlabel('Log Odds Ratio', fontsize=18, fontweight='bold')
-        
-        plt.tight_layout()
-        
-        # Save the plot
-        plt.savefig(FIGURES_TOPICS + "/forest_plot_goal_choice_experiment_h2_only.png", dpi=300, bbox_inches='tight')
-        plt.show()
-        
-        # Print summary statistics
         print(f"\n{'='*80}")
         print(f"EXPERIMENT H2 GOAL CHOICE MIXED EFFECTS MODEL RESULTS")
         print(f"{'='*80}")
@@ -738,16 +653,64 @@ class PlotMeasuresMixedEffects(PlotMeasures):
         
         return result
 
+    # final-final manuscript: Figure 9A.
+    # 9A: Figure9A.png
+    # See analysis/README.md and reproduce_figures.py for inputs and panel aliases.
+    @staticmethod
+    def plot_figure9a():
+        """
+        Combine goal RT and goal choice forest plots as subplots of Figure 9A.
+        Left: Goal Switch Choice; Right: Goal Reaction Time.
+        Saves to Figure9A.png.
+        """
+        import os
+        import pandas as pd
+
+        file_path = CACHE_DIR + 'all_subjects_model_parameters_online.csv'
+        if not os.path.exists(file_path):
+            print(f"Warning: File not found: {file_path}")
+            return None
+
+        df = pd.read_csv(file_path)
+        print(f"Loaded H2: {len(df)} rows")
+
+        rt_result = PlotMeasuresMixedEffects._fit_rt_mixed_effects_h2(df)
+        choice_result = PlotMeasuresMixedEffects._fit_goal_choice_mixed_effects_h2(df)
+
+        if rt_result is None or choice_result is None:
+            print("No valid results for Figure 9A")
+            return None
+
+        fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+
+        PlotMeasuresMixedEffects._draw_forest_panel(
+            axes[0], choice_result,
+            title='Goal Switch Choice', xlabel='Log Odds Ratio', coef_fmt='.2f'
+        )
+        PlotMeasuresMixedEffects._draw_forest_panel(
+            axes[1], rt_result,
+            title='Goal Reaction Time', xlabel='Effect Size (ms)', coef_fmt='.1f',
+            show_ylabels=False
+        )
+
+        plt.tight_layout()
+        plt.savefig(FIGURES_TOPICS + "/Figure9A.png", dpi=300, bbox_inches='tight')
+        plt.show()
+
+        return fig
 
 
 if __name__ == "__main__":
     # Create all forest plots
     
     print("\nCreating forest plot for experiment H2 only...")
-    PlotMeasuresMixedEffects.plot_forest_plot_experiment_h2_only()
+    #PlotMeasuresMixedEffects.plot_forest_plot_experiment_h2_only()
     
     print("\nCreating forest plot for goal choice in experiment H2...")
-    PlotMeasuresMixedEffects.plot_forest_plot_goal_choice_experiment_h2_only()
+    #PlotMeasuresMixedEffects.plot_forest_plot_goal_choice_experiment_h2_only()
+
+    print("\nCreating combined Figure 9A...")
+    PlotMeasuresMixedEffects.plot_figure9a()
     
     print("\nCreating forest plot for goal RT switch vs stay trials...")
     PlotMeasuresMixedEffects.plot_forest_plot_goal_rt_switch_vs_stay()

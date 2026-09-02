@@ -87,6 +87,8 @@ class ModelComparisons:
                     ll = likelihood_dict['stay_loglikelihoods'] + likelihood_dict['switch_loglikelihoods'] + \
                     likelihood_dict['subgoal_stay_loglikelihoods'] + likelihood_dict['subgoal_switch_loglikelihoods']
 
+            # ll stores NEGATIVE log likelihood, hence +2*ll in AIC/BIC.
+            # Full-block BIC retains the historical num_samples=360 convention.
             if not AIC:
                 bic = 2 * ll + (len(params))  * np.log(num_samples)
             else:
@@ -346,6 +348,9 @@ class ModelComparisons:
             print(f"{i+1}. {model}: {score:.2f} ± {std_scores[i]:.2f}")
         print(f"Consecutive p-values: {pvals}")
 
+    # final-final manuscript: Figure 8A.
+    # 8A: all_models_comparison_H2_total_only.png
+    # See analysis/README.md and reproduce_figures.py for inputs and panel aliases.
     def plot_comprehensive_model_comparison(self):
         """
         Create a comprehensive comparison plot showing all 9 models using total likelihood only.
@@ -685,6 +690,9 @@ class ModelComparisons:
             
         return aic_scores, bic_scores
 
+    # final-final manuscript: Figure 8B.
+    # 8B: all_models_comparison_by_block_half_H2_total.png
+    # See analysis/README.md and reproduce_figures.py for inputs and panel aliases.
     def plot_comprehensive_model_comparison_by_block_half(self):
         """
         Create a comprehensive comparison plot showing all models for first half and second half of blocks.

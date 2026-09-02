@@ -1,4 +1,5 @@
 from plot_measures import *
+from plot_measures import _format_correlation_annotation
 
 
 
@@ -6,6 +7,9 @@ class PlotRTMeasures(PlotMeasures):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+    # final-final manuscript: Figure 6A.
+    # 6A: goal_and_subgoal_rt_by_switching_pattern_experiment_H2.png
+    # See analysis/README.md and reproduce_figures.py for inputs and panel aliases.
     def plot_goal_rt_by_switching_pattern(self):
         """
         Plot reaction time bar plots comparing:
@@ -121,6 +125,7 @@ class PlotRTMeasures(PlotMeasures):
                   f"({row['total_trials']} trials, {row['n_subjects']} subjects)")
         
         # Create the plot with two subplots sharing y-axis
+        palette = sns.color_palette("pastel", 6)[:3]
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6), sharey=True)
         
         # Create bar plot for goal RT with switching patterns on x-axis
@@ -128,7 +133,7 @@ class PlotRTMeasures(PlotMeasures):
             data=results_df,
             x='switching_pattern',
             y='mean_rt',
-            palette=['#000000', '#FFFFFF', '#808080'],  # Black, white, gray
+            palette=palette,
             edgecolor='black',
             width=0.4,
             ax=ax1
@@ -236,7 +241,7 @@ class PlotRTMeasures(PlotMeasures):
                 data=subgoal_results_df,
                 x='switching_pattern',
                 y='mean_rt',
-                palette=['#000000', '#FFFFFF', '#808080'],  # Black, white, gray
+                palette=palette,
                 edgecolor='black',
                 width=0.4,
                 ax=ax2
@@ -435,9 +440,8 @@ class PlotRTMeasures(PlotMeasures):
         
         plt.tight_layout()
         
-        # Save figure
-        plt.savefig(FIGURES_TOPICS + f"/goal_and_subgoal_rt_by_switching_pattern_experiment_{self.experiment}.png", 
-                   dpi=300, bbox_inches='tight')
+        figure_path = self.figure_dir + f"/goal_and_subgoal_rt_by_switching_pattern_experiment_{self.experiment}.png"
+        self._save_figure(figure_path)
         plt.show()
         
         # Return both results if subgoal data is available
@@ -1075,6 +1079,9 @@ class PlotRTMeasures(PlotMeasures):
         
         return metrics_df
 
+    # final-final manuscript: Figure 6C.
+    # 6C: goal_rt_by_repetition_experiment_H2.png
+    # See analysis/README.md and reproduce_figures.py for inputs and panel aliases.
     def plot_goal_rt_by_repetition(self):
         """
         Plot goal reaction time as a function of consecutive repetitions of the same goal-subgoal pair.
@@ -1183,24 +1190,25 @@ class PlotRTMeasures(PlotMeasures):
                   f"({row['total_trials']} trials, {row['n_subjects']} subjects)")
         
         # Create the plot
+        line_color = sns.color_palette("pastel", 6)[0]
         fig, ax = plt.subplots(1, 1, figsize=(10, 6))
         
         # Plot line with shaded SEM confidence interval
         ax.fill_between(results_df['repetition_number'], 
                        results_df['mean_rt'] - results_df['sem_rt'],
                        results_df['mean_rt'] + results_df['sem_rt'],
-                       alpha=0.3, color='#B0B0B0', label='SEM')
+                       alpha=0.3, color=line_color)
         
         # Plot the main line with markers
         ax.plot(results_df['repetition_number'], results_df['mean_rt'], 
                marker='o', markersize=8, linewidth=3,
-               color='black', markerfacecolor='black', markeredgecolor='black', 
-               markeredgewidth=1, alpha=0.9, label='Mean RT')
+               color=line_color, markerfacecolor=line_color, markeredgecolor='black', 
+               markeredgewidth=1, alpha=0.9)
         
         # Customize the plot
-        ax.set_xlabel('Consecutive Repetition Number', fontsize=16, fontweight='bold')
-        ax.set_ylabel('Goal Reaction Time (ms)', fontsize=16, fontweight='bold')
-        ax.set_title('Goal-Subgoal Repetition Effect on Goal RT', fontsize=18, fontweight='bold')
+        ax.set_xlabel('Consecutive Repetition Number', fontsize=20, fontweight='bold')
+        ax.set_ylabel('Goal Reaction Time (ms)', fontsize=20, fontweight='bold')
+        ax.set_title('Goal-Subgoal Repetition Effect on Goal RT', fontsize=22, fontweight='bold')
         
         # Set x-axis to show integer values
         ax.set_xticks(results_df['repetition_number'])
@@ -1210,7 +1218,7 @@ class PlotRTMeasures(PlotMeasures):
         ax.grid(True, alpha=0.3)
         
         # Make tick labels bold
-        ax.tick_params(axis='both', labelsize=14)
+        ax.tick_params(axis='both', labelsize=16)
         for label in ax.get_xticklabels():
             label.set_weight('bold')
         for label in ax.get_yticklabels():
@@ -1228,11 +1236,10 @@ class PlotRTMeasures(PlotMeasures):
             
             x_trend = np.linspace(1, max_repetitions, 100)
             y_trend = slope * x_trend + intercept
-            ax.plot(x_trend, y_trend, 'k:', linewidth=2, alpha=0.7, label=f'Trend (r={r_value:.3f})')
+            ax.plot(x_trend, y_trend, linestyle=':', linewidth=2, alpha=0.7, color=line_color)
             
-            # Add correlation text
-            ax.text(0.95, 0.95, f'r = {r_value:.3f}\np = {p_value:.3f}', 
-                    transform=ax.transAxes, fontsize=16, fontweight='bold',
+            ax.text(0.95, 0.95, f'r = {r_value:.2f}\np < 0.01',
+                    transform=ax.transAxes, fontsize=18, weight='bold',
                     bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8),
                     ha='right', va='top')
         
@@ -1242,9 +1249,8 @@ class PlotRTMeasures(PlotMeasures):
         
         plt.tight_layout()
         
-        # Save figure
-        plt.savefig(FIGURES_TOPICS + f"/goal_rt_by_repetition_experiment_{self.experiment}.png", 
-                   dpi=300, bbox_inches='tight')
+        figure_path = self.figure_dir + f"/goal_rt_by_repetition_experiment_{self.experiment}.png"
+        self._save_figure(figure_path)
         plt.show()
         
         # Statistical analysis
@@ -1266,6 +1272,9 @@ class PlotRTMeasures(PlotMeasures):
         
         return results_df
 
+    # final-final manuscript: Figure 6D.
+    # 6D: subgoal_rt_by_repetition_experiment_H2.png
+    # See analysis/README.md and reproduce_figures.py for inputs and panel aliases.
     def plot_subgoal_rt_by_repetition(self):
         """
         Plot subgoal reaction time as a function of consecutive repetitions of the same goal-subgoal pair.
@@ -1374,24 +1383,25 @@ class PlotRTMeasures(PlotMeasures):
                   f"({row['total_trials']} trials, {row['n_subjects']} subjects)")
         
         # Create the plot
+        line_color = sns.color_palette("pastel", 6)[1]
         fig, ax = plt.subplots(1, 1, figsize=(10, 6))
         
         # Plot line with shaded SEM confidence interval
         ax.fill_between(results_df['repetition_number'], 
                        results_df['mean_rt'] - results_df['sem_rt'],
                        results_df['mean_rt'] + results_df['sem_rt'],
-                       alpha=0.3, color='#B0B0B0', label='SEM')
+                       alpha=0.3, color=line_color)
         
         # Plot the main line with markers
         ax.plot(results_df['repetition_number'], results_df['mean_rt'], 
                marker='o', markersize=8, linewidth=3,
-               color='black', markerfacecolor='black', markeredgecolor='black', 
-               markeredgewidth=1, alpha=0.9, label='Mean RT')
+               color=line_color, markerfacecolor=line_color, markeredgecolor='black', 
+               markeredgewidth=1, alpha=0.9)
         
         # Customize the plot
-        ax.set_xlabel('Consecutive Repetition Number', fontsize=16, fontweight='bold')
-        ax.set_ylabel('Subgoal Reaction Time (ms)', fontsize=16, fontweight='bold')
-        ax.set_title('Goal-Subgoal Repetition Effect on Subgoal RT', fontsize=18, fontweight='bold')
+        ax.set_xlabel('Consecutive Repetition Number', fontsize=20, fontweight='bold')
+        ax.set_ylabel('Subgoal Reaction Time (ms)', fontsize=20, fontweight='bold')
+        ax.set_title('Goal-Subgoal Repetition Effect on Subgoal RT', fontsize=22, fontweight='bold')
         
         # Set x-axis to show integer values
         ax.set_xticks(results_df['repetition_number'])
@@ -1401,7 +1411,7 @@ class PlotRTMeasures(PlotMeasures):
         ax.grid(True, alpha=0.3)
         
         # Make tick labels bold
-        ax.tick_params(axis='both', labelsize=14)
+        ax.tick_params(axis='both', labelsize=16)
         for label in ax.get_xticklabels():
             label.set_weight('bold')
         for label in ax.get_yticklabels():
@@ -1419,19 +1429,17 @@ class PlotRTMeasures(PlotMeasures):
             
             x_trend = np.linspace(1, max_repetitions, 100)
             y_trend = slope * x_trend + intercept
-            ax.plot(x_trend, y_trend, 'k:', linewidth=2, alpha=0.7, label=f'Trend (r={r_value:.3f})')
+            ax.plot(x_trend, y_trend, linestyle=':', linewidth=2, alpha=0.7, color=line_color)
             
-            # Add correlation text
-            ax.text(0.95, 0.95, f'r = {r_value:.3f}\np = {p_value:.3f}', 
-                    transform=ax.transAxes, fontsize=16, fontweight='bold',
+            ax.text(0.95, 0.95, _format_correlation_annotation(r_value, p_value),
+                    transform=ax.transAxes, fontsize=18, weight='bold',
                     bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8),
                     ha='right', va='top')
         
         plt.tight_layout()
         
-        # Save figure
-        plt.savefig(FIGURES_TOPICS + f"/subgoal_rt_by_repetition_experiment_{self.experiment}.png", 
-                   dpi=300, bbox_inches='tight')
+        figure_path = self.figure_dir + f"/subgoal_rt_by_repetition_experiment_{self.experiment}.png"
+        self._save_figure(figure_path)
         plt.show()
         
         # Statistical analysis
@@ -1469,4 +1477,4 @@ if __name__ == "__main__":
     #repetition_results = plot_rt.plot_goal_rt_by_repetition()
     
     # New method: Subgoal RT by repetition
-    subgoal_repetition_results = plot_rt.plot_subgoal_rt_by_repetition()
+    #subgoal_repetition_results = plot_rt.plot_subgoal_rt_by_repetition()

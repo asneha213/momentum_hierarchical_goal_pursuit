@@ -111,7 +111,14 @@ class ModelParameterDF:
 
 def get_all_subjects_concatenated_model_dataframe(data_type='online', model_name="momentum_learn_alt_goal", optimal=False, simulate=False, read_from_csv=False):
     """
-    Returns a concatenated dataframe of all subjects for the specified experiment and data type.
+    Return trial-level behavior enriched by replaying fitted model parameters.
+
+    Manuscript input: data_type="online", model_name="momentum_learn_alt_goal",
+    optimal=False, simulate=False. This replays observed actions, not new choices.
+    Reads raw experiment_0 JSON and results_online/<model>_0/<subject>.pkl.
+    CSV reads/writes are relative to the CURRENT WORKING DIRECTORY; run from
+    analysis/cache when rebuilding all_subjects_model_parameters_online.csv.
+    See analysis/README.md before rebuilding: subject IDs depend on file ordering.
     """
     if read_from_csv:
         if model_name == "momentum_learn_alt_goal" and not optimal:

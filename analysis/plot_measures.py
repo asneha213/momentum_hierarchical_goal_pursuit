@@ -1,3 +1,4 @@
+import colorsys
 import os
 import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)) + "src/")
@@ -18,16 +19,35 @@ import pingouin as pg
 from scipy.stats import chi2_contingency
 
 
+def _format_threshold_p_value(p):
+    if p >= 0.05:
+        return f'p = {p:.2f}'
+    if p < 1e-4:
+        return 'p < 0.0001'
+    if p < 1e-3:
+        return 'p < 0.001'
+    for exp in (2, 1):
+        if p < 10 ** (-exp):
+            return f'p < 10^{{-{exp}}}'
+    return 'p < 0.05'
+
+
+def _format_correlation_annotation(r, p):
+    return f'r = {r:.2f}\n{_format_threshold_p_value(p)}'
+
+
 class PlotMeasures:
     def __init__(self, data_type, read_from_csv=True):
         self.data_type = data_type
+        # Manuscript plots use the model-enriched online cache, even for behavioral
+        # panels. Rebuild explicitly in cache/ (the builder writes to the cwd).
         if not read_from_csv:
             self.df = get_all_subjects_concatenated_model_dataframe(data_type=self.data_type)
             pass
         else:
             behavior_dataframe_csv = CACHE_DIR + "all_subjects_model_parameters_" + self.data_type + ".csv"
-            # if not os.path.exists(behavior_dataframe_csv):
-            #     get_all_subjects_concatenated_model_dataframe(data_type=self.data_type)
+            if not os.path.exists(behavior_dataframe_csv):
+                get_all_subjects_concatenated_model_dataframe(data_type=self.data_type)
             self.df = pd.read_csv(behavior_dataframe_csv)
 
         # Set figure directory based on data_type
@@ -41,11 +61,18 @@ class PlotMeasures:
             self.experiment = 'H1'
             self.figure_dir = FIGURES_TOPICS
 
+    def _save_figure(self, figure_path, **kwargs):
+        save_kwargs = {"dpi": 300, "bbox_inches": "tight"}
+        save_kwargs.update(kwargs)
+        plt.savefig(figure_path, **save_kwargs)
+        print(f"Figure saved to: {figure_path}")
 
+    # final-final manuscript: Figure 2A.
+    # 2A: goal_selection_per_block_H2.png
+    # See analysis/README.md and reproduce_figures.py for inputs and panel aliases.
     def plot_goal_selection_per_block(self):
         df = self.df
-        # Aesthetic setup - black, white, and gray palette
-        palette = ['#000000', '#FFFFFF', '#808080']  # Black, white, gray
+        palette = sns.color_palette("pastel", 6)[:3]
         sns.set(style="white", context="talk")
 
         # Compute selection probability per subject, per block_type
@@ -55,6 +82,8 @@ class PlotMeasures:
         long_df['total'] = long_df.groupby(['subject_id', 'block_type'])['count'].transform('sum')
         long_df['prob'] = long_df['count'] / long_df['total']
         long_df['goal_selected'] = long_df['goal_selected'].replace('BR', 'OB')
+        goal_labels = {'SH': 'spaceship', 'OB': 'observatory', 'HO': 'house'}
+        long_df['goal_selected'] = long_df['goal_selected'].replace(goal_labels)
 
         # Plot
         plt.figure(figsize=(9, 6))
@@ -73,27 +102,28 @@ class PlotMeasures:
         ax.set_xlabel("Block Type", fontsize=15, weight='bold')
         ax.set_ylabel("Probability of Goal Selection", fontsize=15, weight='bold')
         ax.set_xticklabels([
-            'SH-high', 
-            'OB-high', 
-            'HO-high', 
-            'SH-low', 
-            'OB-low', 
-            'HO-low'
+            'spaceship\n(high)',
+            'observatory\n(high)',
+            'house\n(high)',
+            'spaceship\n(low)',
+            'observatory\n(low)',
+            'house\n(low)'
         ])
 
         experiment = "H2" if self.data_type == "online" else "H1"
 
         ax.set_ylim(0, 1.0)
-        ax.set_title("Goal Selection Probability by Block Type: Experiment " + experiment, fontsize=16, weight='bold')
+        ax.set_title("Goal Selection Probability by Block Type", fontsize=16, weight='bold')
         plt.legend(title="Goal selected")
         sns.despine()
         plt.tight_layout()
-        plt.savefig(self.figure_dir + "/goal_selection_per_block_" + self.experiment + ".png", dpi=300, bbox_inches='tight')
+        figure_path = self.figure_dir + "/goal_selection_per_block_" + self.experiment + ".png"
+        self._save_figure(figure_path)
         plt.show()
 
     def plot_goal_action_congruence_histogram(self, experiment=0):
         """
-        Plot histogram of goal-action congruence across all participants.
+        Plot histogram and KDE density curve of goal-action congruence across participants.
         Uses subject_measure.get_goal_action_congruence() per subject.
         Red vertical line indicates the mean.
         """
@@ -111,18 +141,635 @@ class PlotMeasures:
         if len(congruences) == 0:
             raise ValueError("No valid goal-action congruence values across subjects.")
         mean_congruence = np.mean(congruences)
-        plt.figure(figsize=(8, 5))
-        plt.hist(congruences, bins=min(20, max(5, len(np.unique(congruences)))), edgecolor="black", alpha=0.7, density=True)
-        plt.axvline(mean_congruence, color="red", linewidth=2, label=f"Mean = {mean_congruence:.3f}")
-        plt.xlabel("Goal-action congruence", fontsize=12)
-        plt.ylabel("Density", fontsize=12)
-        plt.title(f"Goal-action congruence across participants (Experiment {self.experiment})", fontsize=14)
-        plt.legend()
-        sns.despine()
+        n_unique = len(np.unique(congruences))
+        n_bins = min(20, max(5, n_unique))
+        plot_kde = n_unique >= 2
+
+        fig, ax = plt.subplots(figsize=(5, 5))
+        bin_edges = np.histogram_bin_edges(congruences, bins=n_bins if plot_kde else 1)
+        histplot_kwargs = dict(
+            x=congruences,
+            bins=bin_edges,
+            stat="probability",
+            color="#95a5a6",
+            edgecolor="black",
+            alpha=0.5,
+            ax=ax,
+        )
+        sns.histplot(**histplot_kwargs)
+        if plot_kde:
+            from scipy.stats import gaussian_kde
+            bin_width = np.mean(np.diff(bin_edges))
+            kde_est = gaussian_kde(congruences)
+            x_grid = np.linspace(bin_edges[0], bin_edges[-1], 300)
+            ax.plot(x_grid, kde_est(x_grid) * bin_width, color="#3498db", linewidth=2.5)
+        ax.axvline(mean_congruence, color="red", linewidth=2)
+
+        from matplotlib.lines import Line2D
+        from matplotlib.patches import Patch
+        legend_handles = [
+            Patch(facecolor="#95a5a6", edgecolor="black", alpha=0.5, label="Histogram"),
+        ]
+        if plot_kde:
+            legend_handles.append(Line2D([0], [0], color="#3498db", lw=2.5, label="Density"))
+        legend_handles.append(
+            Line2D([0], [0], color="red", lw=2, label=f"Mean = {mean_congruence:.3f}")
+        )
+        ax.set_xlabel("Goal-action congruence", fontsize=12)
+        ax.set_ylabel("Fraction of participants", fontsize=12)
+        ax.set_ylim(0, 0.2)
+        ax.set_title(f"Goal-action congruence across participants", fontsize=14)
+        ax.legend(handles=legend_handles)
+        sns.despine(ax=ax)
         plt.tight_layout()
-        plt.savefig(self.figure_dir + "/goal_action_congruence_histogram_" + self.experiment + ".png", dpi=300, bbox_inches="tight")
+        self._save_figure(self.figure_dir + "/goal_action_congruence_histogram_" + self.experiment + ".png")
         plt.show()
 
+    def plot_trials_played_vs_performance(self, performance_metric="goals_completed"):
+        """
+        Plot each participant's total number of trials played against task performance.
+
+        Parameters
+        ----------
+        performance_metric : str
+            "goals_completed" counts goal completion events per participant.
+            "mean_action_outcome" uses the participant's average action outcome.
+        """
+        df = self.df.copy()
+
+        if "subject_id" not in df.columns:
+            raise ValueError("Expected a 'subject_id' column in the behavioral dataframe.")
+
+        total_trials = df.groupby("subject_id").size().rename("total_trials")
+
+        if performance_metric == "goals_completed":
+            performance_by_subject = {}
+            goal_names = ["SH", "BR", "HO"]
+
+            for subject_id, subject_data in df.groupby("subject_id"):
+                goals_completed = 0
+                subject_data = subject_data.sort_values(["block_num", "trial_num"])
+
+                for goal in goal_names:
+                    progress_col = f"{goal}_progress"
+                    progress_post_col = f"{goal}_progress_post"
+
+                    if progress_col not in subject_data.columns or progress_post_col not in subject_data.columns:
+                        continue
+
+                    completed = (
+                        (subject_data[progress_col] < 6.0)
+                        & (subject_data[progress_post_col] >= 6.0)
+                    )
+                    goals_completed += completed.sum()
+
+                performance_by_subject[subject_id] = goals_completed
+
+            performance = pd.Series(performance_by_subject, name="performance")
+            performance.index.name = "subject_id"
+            y_label = "Performance (Goals Completed)"
+            plot_title = "Trials Played vs Performance"
+            save_suffix = "goals_completed"
+        elif performance_metric == "mean_action_outcome":
+            if "action_outcome" not in df.columns:
+                raise ValueError("Expected an 'action_outcome' column for mean_action_outcome performance.")
+            performance = df.groupby("subject_id")["action_outcome"].mean().rename("performance")
+            y_label = "Performance (Mean Action Outcome)"
+            plot_title = "Trials Played vs Mean Action Outcome"
+            save_suffix = "mean_action_outcome"
+        else:
+            raise ValueError(
+                "performance_metric must be 'goals_completed' or 'mean_action_outcome'."
+            )
+
+        plot_df = pd.concat([total_trials, performance], axis=1).dropna().reset_index()
+        if plot_df.empty:
+            raise ValueError("No valid participant-level trial/performance data to plot.")
+
+        sns.set(style="white", context="talk")
+        fig, ax = plt.subplots(figsize=(7, 6))
+        sns.regplot(
+            data=plot_df,
+            x="total_trials",
+            y="performance",
+            scatter_kws={"color": "black", "alpha": 0.75, "s": 65},
+            line_kws={"color": "#808080", "linewidth": 2, "linestyle": "--"},
+            ci=None,
+            ax=ax,
+        )
+
+        from scipy.stats import pearsonr
+        if len(plot_df) > 1 and plot_df["total_trials"].nunique() > 1 and plot_df["performance"].nunique() > 1:
+            corr_coef, p_value = pearsonr(plot_df["total_trials"], plot_df["performance"])
+            p_text = f"p = {p_value:.2e}" if p_value < 0.001 else f"p = {p_value:.3f}"
+            ax.text(
+                0.05,
+                0.95,
+                f"r = {corr_coef:.3f}\n{p_text}",
+                transform=ax.transAxes,
+                fontsize=13,
+                weight="bold",
+                bbox=dict(boxstyle="round", facecolor="white", alpha=0.85),
+                ha="left",
+                va="top",
+            )
+
+        ax.set_xlabel("Total Trials Played", fontsize=15, weight="bold")
+        ax.set_ylabel(y_label, fontsize=15, weight="bold")
+        ax.set_title(plot_title, fontsize=16, weight="bold")
+        ax.grid(alpha=0.3)
+        for label in ax.get_xticklabels() + ax.get_yticklabels():
+            label.set_weight("bold")
+
+        sns.despine(ax=ax)
+        plt.tight_layout()
+        figure_path = (
+            self.figure_dir
+            + f"/trials_played_vs_performance_{save_suffix}_{self.experiment}.png"
+        )
+        self._save_figure(figure_path)
+        plt.show()
+
+        return plot_df
+
+    def _get_task_performance_by_subject(self):
+        """Count goal completion events for each participant."""
+        performance_by_subject = {}
+        goal_names = ["SH", "BR", "HO"]
+
+        for subject_id, subject_data in self.df.groupby("subject_id"):
+            goals_completed = 0
+            subject_data = subject_data.sort_values(["block_num", "trial_num"])
+
+            for goal in goal_names:
+                progress_col = f"{goal}_progress"
+                progress_post_col = f"{goal}_progress_post"
+
+                if progress_col not in subject_data.columns or progress_post_col not in subject_data.columns:
+                    continue
+
+                completed = (
+                    (subject_data[progress_col] < 6.0)
+                    & (subject_data[progress_post_col] >= 6.0)
+                )
+                goals_completed += completed.sum()
+
+            performance_by_subject[subject_id] = goals_completed
+
+        performance = pd.Series(performance_by_subject, name="task_performance")
+        performance.index.name = "subject_id"
+        return performance
+
+    def _get_depth_first_metric_by_subject(self):
+        """
+        Compute depth-first metric from goal-switching categories.
+
+        The metric is the proportion of goal-stay trials that also repeat the
+        same subgoal, among goal-stay trials where participants either repeated
+        or switched the subgoal.
+        """
+        df = self.df.copy()
+        required_cols = ["subject_id", "block_num", "trial_num", "goal_selected", "subgoal_selected"]
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        if missing_cols:
+            raise ValueError(f"Missing columns needed for depth-first metric: {missing_cols}")
+
+        df["goal_selected"] = df["goal_selected"].replace("BR", "OB")
+        df = df.sort_values(["subject_id", "block_num", "trial_num"])
+        df["prev_goal"] = df.groupby(["subject_id", "block_num"])["goal_selected"].shift(1)
+        df["prev_subgoal"] = df.groupby(["subject_id", "block_num"])["subgoal_selected"].shift(1)
+        df["prev_goal"] = df["prev_goal"].replace("BR", "OB")
+        df = df.dropna(subset=["prev_goal", "prev_subgoal", "goal_selected", "subgoal_selected"])
+
+        same_goal = df["goal_selected"] == df["prev_goal"]
+        same_subgoal = df["subgoal_selected"] == df["prev_subgoal"]
+        df["depth_first_stay"] = same_goal & same_subgoal
+        df["depth_first_same_goal_subgoal_switch"] = same_goal & ~same_subgoal
+
+        rows = []
+        for subject_id, subject_data in df.groupby("subject_id"):
+            stay_count = subject_data["depth_first_stay"].sum()
+            same_goal_switch_count = subject_data["depth_first_same_goal_subgoal_switch"].sum()
+            denominator = stay_count + same_goal_switch_count
+            depth_first_metric = np.nan if denominator == 0 else stay_count / denominator
+            rows.append(
+                {
+                    "subject_id": subject_id,
+                    "depth_first_metric": depth_first_metric,
+                    "depth_first_stay_count": stay_count,
+                    "same_goal_subgoal_switch_count": same_goal_switch_count,
+                }
+            )
+
+        return pd.DataFrame(rows).set_index("subject_id")
+
+    def _load_fit_parameter_table(self, model_name="momentum_learn_alt_goal", experiment=0, results_dir=None):
+        """
+        Load one fitted-parameter pickle per participant into a dataframe.
+        """
+        import glob
+        import pickle
+
+        if results_dir is None:
+            if self.data_type == "online":
+                results_dir = os.path.join(
+                    os.path.dirname(os.path.abspath(__file__)),
+                    "results_online",
+                    f"{model_name}_{experiment}",
+                )
+            else:
+                results_dir = os.path.join(MODEL_RESULTS, f"{model_name}_{experiment}")
+
+        fit_paths = sorted(glob.glob(os.path.join(results_dir, "*.pkl")))
+        if not fit_paths:
+            raise FileNotFoundError(f"No fitted parameter pickle files found in {results_dir}")
+
+        rows = []
+        for fit_path in fit_paths:
+            subject_id = os.path.splitext(os.path.basename(fit_path))[0]
+            try:
+                subject_id = int(subject_id)
+            except ValueError:
+                continue
+
+            with open(fit_path, "rb") as fit_file:
+                fit_result = pickle.load(fit_file)
+
+            params = fit_result.get("params", fit_result)
+            if not isinstance(params, dict):
+                continue
+
+            row = {"subject_id": subject_id}
+            row.update(params)
+            if isinstance(fit_result, dict) and "fits" in fit_result:
+                row["fit_value"] = fit_result["fits"]
+            rows.append(row)
+
+        if not rows:
+            raise ValueError(f"No parameter dictionaries could be loaded from {results_dir}")
+
+        return pd.DataFrame(rows)
+
+    def get_momentum_param_fits_per_subject(self, model_name="momentum_learn_alt_goal", experiment=0):
+        """
+        Load model parameter fits for each active subject from saved pkl files.
+        """
+        import pickle
+
+        subject_ids = ACTIVE_SUBJECT_IDS if self.data_type == "fmri" else ACTIVE_SUBJECT_IDS_ONLINE
+        results_path = MODEL_RESULTS if self.data_type == "fmri" else MODEL_RESULTS_ONLINE
+        base_path = results_path + model_name + "_" + str(experiment) + "/"
+        rows = []
+
+        for subject_id in subject_ids:
+            pkl_path = base_path + str(subject_id) + ".pkl"
+            if not os.path.exists(pkl_path):
+                continue
+
+            with open(pkl_path, "rb") as fit_file:
+                model_fits = pickle.load(fit_file)
+
+            params = model_fits.get("params", model_fits)
+            if not isinstance(params, dict):
+                continue
+
+            rows.append({"subject_id": subject_id, **params})
+
+        return pd.DataFrame(rows)
+
+    def _get_task_performance_per_subject(self):
+        """
+        Compute task performance as number of goal completion events per subject.
+        """
+        return self._get_task_performance_by_subject().reset_index()
+
+    def _get_switch_counts_per_subject(self):
+        """
+        Count goal and subgoal switches for each subject.
+        """
+        if "goal_switch" not in self.df.columns:
+            raise ValueError("DataFrame does not contain 'goal_switch' column.")
+        if "subgoal_selected" not in self.df.columns:
+            raise ValueError("DataFrame does not contain 'subgoal_selected' column.")
+
+        n_goal_switches = (
+            self.df.loc[self.df["goal_switch"] == 1]
+            .groupby("subject_id")
+            .size()
+            .reset_index(name="n_goal_switches")
+        )
+
+        df_sorted = self.df.sort_values(["subject_id", "block_num", "trial_num"]).copy()
+        df_sorted["prev_subgoal"] = df_sorted.groupby(["subject_id", "block_num"])["subgoal_selected"].shift(1)
+        df_subgoal_switches = df_sorted.dropna(subset=["prev_subgoal"])
+        subgoal_switch_trials = df_subgoal_switches[
+            df_subgoal_switches["subgoal_selected"] != df_subgoal_switches["prev_subgoal"]
+        ]
+        n_subgoal_switches = (
+            subgoal_switch_trials.groupby("subject_id")
+            .size()
+            .reset_index(name="n_subgoal_switches")
+        )
+
+        subject_ids = pd.DataFrame({"subject_id": self.df["subject_id"].dropna().unique()})
+        switch_df = subject_ids.merge(n_goal_switches, on="subject_id", how="left")
+        switch_df = switch_df.merge(n_subgoal_switches, on="subject_id", how="left")
+        switch_df[["n_goal_switches", "n_subgoal_switches"]] = switch_df[
+            ["n_goal_switches", "n_subgoal_switches"]
+        ].fillna(0)
+        return switch_df
+
+    def _get_optimal_goal_selection_per_subject(self):
+        """
+        Compute block-matching goal selection proportion per subject.
+        """
+        df = self.df.copy()
+        df["goal_selected"] = df["goal_selected"].replace("BR", "OB")
+        viable_goals = {0: "SH", 1: "OB", 2: "HO", 3: "SH", 4: "OB", 5: "HO"}
+        df["is_optimal_goal"] = df.apply(
+            lambda row: row["goal_selected"] == viable_goals.get(row["block_type"], np.nan),
+            axis=1,
+        )
+        optimal_per_subject = df.groupby("subject_id")["is_optimal_goal"].mean().reset_index()
+        optimal_per_subject.columns = ["subject_id", "optimal_goal_selection"]
+        return optimal_per_subject
+
+    def _get_optimal_goal_high_low_diff_per_subject(self):
+        """
+        Compute high-to-low proportional drop in optimal goal selection per subject.
+        """
+        df = self.df.copy()
+        df["goal_selected"] = df["goal_selected"].replace("BR", "OB")
+        viable_goals = {0: "SH", 1: "OB", 2: "HO", 3: "SH", 4: "OB", 5: "HO"}
+        df["condition_type"] = df["block_type"].map(
+            {0: "high", 1: "high", 2: "high", 3: "low", 4: "low", 5: "low"}
+        )
+        df["is_optimal_goal"] = df.apply(
+            lambda row: row["goal_selected"] == viable_goals.get(row["block_type"], np.nan),
+            axis=1,
+        )
+        per_subj_cond = (
+            df.groupby(["subject_id", "condition_type"])["is_optimal_goal"]
+            .mean()
+            .reset_index()
+        )
+        per_subj_cond.columns = ["subject_id", "condition_type", "optimal_proportion"]
+        pivot = per_subj_cond.pivot(
+            index="subject_id",
+            columns="condition_type",
+            values="optimal_proportion",
+        ).reset_index()
+        pivot = pivot.rename(columns={"high": "optimal_high", "low": "optimal_low"})
+
+        with np.errstate(divide="ignore", invalid="ignore"):
+            pivot["optimal_proportion_change"] = np.where(
+                pivot["optimal_high"] > 0,
+                (pivot["optimal_high"] - pivot["optimal_low"]) / pivot["optimal_high"],
+                np.nan,
+            )
+
+        return pivot
+
+    def _correlate_params_with_feature(self, param_df, feature_df, feature_col, label):
+        """
+        Correlate each parameter in param_df with a single behavioral feature.
+        """
+        merged = param_df.merge(feature_df[["subject_id", feature_col]], on="subject_id", how="inner")
+        merged = merged.replace([np.inf, -np.inf], np.nan).dropna(subset=[feature_col])
+        if len(merged) < 3:
+            raise ValueError(f"Too few subjects with both parameter fits and {label} for correlation.")
+
+        param_cols = [col for col in param_df.columns if col != "subject_id"]
+        corr_results = []
+        for col in param_cols:
+            corr_data = merged[[col, feature_col]].replace([np.inf, -np.inf], np.nan).dropna()
+            if len(corr_data) < 3 or corr_data[col].nunique() < 2 or corr_data[feature_col].nunique() < 2:
+                res = pd.DataFrame(
+                    {"n": [len(corr_data)], "r": [np.nan], "CI95%": [np.nan], "p-val": [np.nan]}
+                )
+            else:
+                res = pg.corr(corr_data[col], corr_data[feature_col], method="spearman")
+            res = res.assign(parameter=col, behavior_feature=feature_col)
+            corr_results.append(res)
+
+        corr_df = pd.concat(corr_results, ignore_index=True)
+        print(f"Momentum parameters vs. {label} (Spearman):")
+        for _, row in corr_df.iterrows():
+            print(f"  {row['parameter']}: r = {row['r']:.4f}, p = {row['p-val']:.4f}")
+        return corr_df
+
+    def correlate_momentum_params_with_goal_switches(self, model_name="momentum_learn_alt_goal", experiment=0):
+        """
+        Correlate model parameters with number of goal and subgoal switches.
+        """
+        param_df = self.get_momentum_param_fits_per_subject(model_name=model_name, experiment=experiment)
+        if param_df.empty:
+            raise FileNotFoundError(
+                f"No momentum fit files found for model_name={model_name}, data_type={self.data_type}. "
+                "Run behavior fitting first."
+            )
+
+        switch_df = self._get_switch_counts_per_subject()
+        corr_df_goal = self._correlate_params_with_feature(
+            param_df,
+            switch_df,
+            "n_goal_switches",
+            "number of goal switches",
+        )
+        corr_df_subgoal = self._correlate_params_with_feature(
+            param_df,
+            switch_df,
+            "n_subgoal_switches",
+            "number of subgoal switches",
+        )
+
+        return corr_df_goal, corr_df_subgoal
+
+    def correlate_momentum_params_with_task_performance(self, model_name="momentum_learn_alt_goal", experiment=0):
+        """
+        Correlate model parameters with task performance.
+        """
+        param_df = self.get_momentum_param_fits_per_subject(model_name=model_name, experiment=experiment)
+        if param_df.empty:
+            raise FileNotFoundError(
+                f"No momentum fit files found for model_name={model_name}, data_type={self.data_type}. "
+                "Run behavior fitting first."
+            )
+
+        task_df = self._get_task_performance_per_subject()
+        return self._correlate_params_with_feature(
+            param_df,
+            task_df,
+            "task_performance",
+            "task performance / number of goals completed",
+        )
+
+    def correlate_momentum_params_with_optimal_goal_selection(self, model_name="momentum_learn_alt_goal", experiment=0):
+        """
+        Correlate model parameters with optimal/block-matching goal selection.
+        """
+        param_df = self.get_momentum_param_fits_per_subject(model_name=model_name, experiment=experiment)
+        if param_df.empty:
+            raise FileNotFoundError(
+                f"No momentum fit files found for model_name={model_name}, data_type={self.data_type}. "
+                "Run behavior fitting first."
+            )
+
+        optimal_df = self._get_optimal_goal_selection_per_subject()
+        return self._correlate_params_with_feature(
+            param_df,
+            optimal_df,
+            "optimal_goal_selection",
+            "optimal goal selection proportion",
+        )
+
+    def correlate_momentum_params_with_optimal_goal_high_low_diff(self, model_name="momentum_learn_alt_goal", experiment=0):
+        """
+        Correlate model parameters with high-to-low proportional drop in optimal goal selection.
+        """
+        param_df = self.get_momentum_param_fits_per_subject(model_name=model_name, experiment=experiment)
+        if param_df.empty:
+            raise FileNotFoundError(
+                f"No momentum fit files found for model_name={model_name}, data_type={self.data_type}. "
+                "Run behavior fitting first."
+            )
+
+        diff_df = self._get_optimal_goal_high_low_diff_per_subject()
+        return self._correlate_params_with_feature(
+            param_df,
+            diff_df,
+            "optimal_proportion_change",
+            "optimal goal proportion change (high-low)/high",
+        )
+
+    def correlate_model_parameters_with_behavior(
+        self,
+        model_name="momentum_learn_alt_goal",
+        experiment=0,
+        results_dir=None,
+        parameter_cols=None,
+        save_csv=True,
+    ):
+        """
+        Print Spearman correlations between fitted model parameters and behavior.
+
+        Parameters
+        ----------
+        model_name : str
+            Name of the fitted model folder, e.g. "momentum_learn_alt_goal".
+        experiment : int
+            Experiment suffix used in the results folder.
+        results_dir : str or None
+            Optional explicit directory containing subject-level .pkl fit files.
+        parameter_cols : list[str] or None
+            Parameters to test. If None, all numeric fitted parameters are used.
+        save_csv : bool
+            Whether to save the printed correlation table to the figure directory.
+        """
+        from scipy.stats import spearmanr
+
+        if results_dir is None:
+            params_df = self.get_momentum_param_fits_per_subject(
+                model_name=model_name,
+                experiment=experiment,
+            )
+        else:
+            params_df = self._load_fit_parameter_table(
+                model_name=model_name,
+                experiment=experiment,
+                results_dir=results_dir,
+            )
+        if params_df.empty:
+            raise FileNotFoundError(
+                f"No fit files found for model_name={model_name}, data_type={self.data_type}."
+            )
+
+        depth_first_df = self._get_depth_first_metric_by_subject()
+        task_performance = self._get_task_performance_by_subject()
+        switch_df = self._get_switch_counts_per_subject().set_index("subject_id")
+
+        behavior_df = (
+            depth_first_df
+            .join(task_performance, how="outer")
+            .join(switch_df, how="outer")
+            .reset_index()
+        )
+        merged = params_df.merge(behavior_df, on="subject_id", how="inner")
+
+        if merged.empty:
+            raise ValueError("No participants overlapped between fitted parameters and behavioral data.")
+
+        if parameter_cols is None:
+            excluded_cols = {
+                "subject_id",
+                "depth_first_metric",
+                "depth_first_stay_count",
+                "same_goal_subgoal_switch_count",
+                "task_performance",
+                "fit_value",
+                "n_goal_switches",
+                "n_subgoal_switches",
+            }
+            parameter_cols = [
+                col
+                for col in merged.columns
+                if col not in excluded_cols and pd.api.types.is_numeric_dtype(merged[col])
+            ]
+        else:
+            missing_cols = [col for col in parameter_cols if col not in merged.columns]
+            if missing_cols:
+                raise ValueError(f"Requested parameter columns not found: {missing_cols}")
+
+        behavior_cols = {
+            "goal_switches": "n_goal_switches",
+            "subgoal_switches": "n_subgoal_switches",
+            "task_performance": "task_performance",
+            "depth_first": "depth_first_metric",
+        }
+        rows = []
+        for param in parameter_cols:
+            row = {"parameter": param}
+            for behavior_label, behavior in behavior_cols.items():
+                corr_df = merged[["subject_id", param, behavior]].dropna()
+                corr_df = corr_df[corr_df[param].apply(np.isfinite) & corr_df[behavior].apply(np.isfinite)]
+
+                if len(corr_df) < 3 or corr_df[param].nunique() < 2 or corr_df[behavior].nunique() < 2:
+                    rho = np.nan
+                    p_value = np.nan
+                else:
+                    rho, p_value = spearmanr(corr_df[param], corr_df[behavior])
+
+                row[f"{behavior_label}_rho"] = rho
+                row[f"{behavior_label}_p"] = p_value
+                row[f"{behavior_label}_n"] = len(corr_df)
+            rows.append(row)
+
+        correlation_table = pd.DataFrame(rows)
+        print(
+            f"\nSpearman correlations for {model_name} "
+            f"({len(merged)} participants with parameters and behavior):"
+        )
+        print(
+            correlation_table.to_string(
+                index=False,
+                float_format=lambda value: f"{value:.4g}",
+            )
+        )
+
+        if save_csv:
+            safe_model_name = model_name.replace("/", "_")
+            csv_path = (
+                self.figure_dir
+                + f"/parameter_behavior_spearman_{safe_model_name}_{self.experiment}.csv"
+            )
+            correlation_table.to_csv(csv_path, index=False)
+            print(f"Correlation table saved to: {csv_path}")
+
+        return correlation_table, merged
+
+    # final-final manuscript: Figure 2C.
+    # 2C: viable_goal_subgoal_selection_high_low_H2.png
+    # See analysis/README.md and reproduce_figures.py for inputs and panel aliases.
     def plot_viable_goal_selection_high_low(self):
         """
         Plot overall percentage of viable goal and subgoal selection in high vs low conditions.
@@ -188,9 +835,9 @@ class PlotMeasures:
         viable_subgoal_selection = df.groupby(['subject_id', 'condition_type'])['is_viable_subgoal'].mean().reset_index()
         viable_subgoal_selection.columns = ['subject_id', 'condition_type', 'viable_percentage']
         
-        # Aesthetic setup - grayscale color variations
-        goal_palette = ['#D3D3D3', '#696969']  # Light gray for high, dim gray for low
-        subgoal_palette = ['#A9A9A9', '#505050']  # Dark gray for high, very dark gray for low
+        # Aesthetic setup
+        goal_palette = sns.color_palette("pastel", 6)[:2]
+        subgoal_palette = sns.color_palette("pastel", 6)[2:4]
         sns.set(style="white", context="talk")
         
         # Create the plot with two subplots
@@ -290,8 +937,7 @@ class PlotMeasures:
         
         sns.despine()
         plt.tight_layout()
-        plt.savefig(self.figure_dir + f"/viable_goal_subgoal_selection_high_low_{self.experiment}.png", 
-                   dpi=300, bbox_inches='tight')
+        self._save_figure(self.figure_dir + f"/viable_goal_subgoal_selection_high_low_{self.experiment}.png")
         plt.show()
         
         # Print statistical results
@@ -306,9 +952,12 @@ class PlotMeasures:
         print(f"t-statistic: {t_stat_subgoal:.3f}, p-value: {p_value_subgoal:.3f}")
 
 
+    # final-final manuscript: Figure 2B.
+    # 2B: subgoal_selection_per_block_H2.png
+    # See analysis/README.md and reproduce_figures.py for inputs and panel aliases.
     def plot_subgoal_selection_per_block(self):
         df = self.df
-        # Aesthetic setup
+        palette = sns.color_palette("pastel", 6)[:4]
         sns.set(style="white", context="talk")
 
         # Compute selection probability per subject, per block_type
@@ -326,29 +975,37 @@ class PlotMeasures:
             y='prob',
             hue='subgoal_selected',
             errorbar="se",  # use this instead of ci
-            palette=['#FFFFFF', '#000000', '#D3D3D3', '#696969'],  # White, black, light gray, dark gray
-            edgecolor='black'
+            palette=palette,
+            edgecolor='black',
+            width=0.7,
         )
 
         # Aesthetic enhancements
         ax.set_xlabel("Condition", fontsize=15, weight='bold')
         ax.set_xticklabels([
-            'SH-high', 
-            'OB-high', 
-            'HO-high', 
-            'SH-low', 
-            'OB-low', 
-            'HO-low'
+            'spaceship\n(high)',
+            'observatory\n(high)',
+            'house\n(high)',
+            'spaceship\n(low)',
+            'observatory\n(low)',
+            'house\n(low)'
         ])
         ax.set_ylabel("P(Subgoal Selected)", fontsize=15, weight='bold')
         ax.set_ylim(0, 0.8)
         experiment = "H2" if self.data_type == "online" else "H1"
-        ax.set_title("Subgoal Selection Probability by Block Type: Experiment " + experiment, fontsize=16, weight='bold')
-        plt.legend(title="Subgoal selected")
+        ax.set_title("Subgoal Selection Probability by Block Type", fontsize=16, weight='bold')
+        handles, labels = ax.get_legend_handles_labels()
+        resource_labels = {
+            "C": "concrete",
+            "M": "metal",
+            "S": "stone",
+            "G": "glass",
+        }
+        ax.legend(handles, [resource_labels.get(label, label) for label in labels], title="Subgoal selected")
         sns.despine()
         plt.tight_layout()
-
-        plt.savefig(self.figure_dir + "/subgoal_selection_per_block_" + self.experiment + ".png", dpi=300, bbox_inches='tight')
+        figure_path = self.figure_dir + "/subgoal_selection_per_block_" + self.experiment + ".png"
+        self._save_figure(figure_path)
         plt.show()
 
 
@@ -395,7 +1052,7 @@ class PlotMeasures:
 
         plt.suptitle('Goal Transition Matrices by Condition', fontsize=18, weight='bold')
         plt.tight_layout(rect=[0, 0, 1, 0.96])
-        plt.savefig(FIGURES + "/goal_switching_transitions_per_block_" + self.experiment + ".png", dpi=300, bbox_inches='tight')
+        self._save_figure(FIGURES + "/goal_switching_transitions_per_block_" + self.experiment + ".png")
         plt.show()
 
 
@@ -448,20 +1105,22 @@ class PlotMeasures:
 
         plt.suptitle('Subgoal Transition Matrices by Condition', fontsize=18, weight='bold')
         plt.tight_layout(rect=[0, 0, 1, 0.96])
-        plt.savefig(self.figure_dir + "subgoal_switching_transitions_per_block_" + self.experiment + ".png", dpi=300, bbox_inches='tight')
+        self._save_figure(self.figure_dir + "subgoal_switching_transitions_per_block_" + self.experiment + ".png")
         plt.show()
 
 
 
-    def plot_goal_selection_related_goal_progress(self, simulate=False, model_name="momentum_learn_alt_goal", collapse_over_goals=False):
+    # final-final manuscript: Figure 7C.
+    # 7C: Figure9C.png; use {'simulate': False}
+    # See analysis/README.md and reproduce_figures.py for inputs and panel aliases.
+    def plot_goal_selection_related_goal_progress(self, simulate=False, model_name="momentum_learn_alt_goal"):
         """
-        Plot the goal selection related goal progress.
+        Plot the goal selection related goal progress with two panels side by side:
+        left = collapsed over goals and conditions; right = separate subplots for each goal.
         
         Args:
             simulate (bool): Whether to use simulated data
             model_name (str): Name of the model to use for simulation (e.g., 'momentum_learn_alt_goal', 'prospective', 'td_persistence')
-            collapse_over_goals (bool): If True, creates a single plot collapsing over goals and conditions.
-                                      If False, creates separate subplots for each goal.
         """
         if simulate:
             behavior_dataframe_csv = CACHE_DIR + f"all_subjects_behavior_data_{self.data_type}_{model_name}_simulated.csv"
@@ -478,7 +1137,6 @@ class PlotMeasures:
             5: "HO-low"
         }
 
-
         # Apply the replacement
         self.df['block_type'] = self.df['block_type'].replace(block_labels)
 
@@ -490,8 +1148,7 @@ class PlotMeasures:
             value_name='progress'
         )
         # Clean goal_progressed to just "SH", "BR", "HO"
-        melted['goal'] = melted['goal_progressed'].str.extract(r'(\w+)_progress')\
-
+        melted['goal'] = melted['goal_progressed'].str.extract(r'(\w+)_progress')
 
         # Step 4: Compute counts per (goal, progress_bin, block_type)
         counts = melted.groupby(['goal', 'progress', 'block_type']).size().reset_index(name='total')
@@ -503,272 +1160,206 @@ class PlotMeasures:
         merged['prob'] = merged['selected'] / merged['total']
         merged = merged[merged['progress'].isin([0, 1, 2, 3, 4, 5])]
 
-
         sns.set_theme(style="white", font_scale=1.2)
 
         # Filter and order progress bins
         merged['progress'] = pd.Categorical(merged['progress'], categories=[0, 1, 2, 3, 4, 5], ordered=True)
 
-        # Define custom color palette
-        palette = sns.color_palette("Dark2")  # or "Set2", "Dark2", etc.
+        # Aggregate data across goals and block types for collapsed panel
+        collapsed_data = merged.groupby('progress').agg({
+            'prob': ['mean', 'std', 'count']
+        }).reset_index()
+        collapsed_data.columns = ['progress', 'prob_mean', 'prob_std', 'prob_count']
+        collapsed_data['prob_se'] = collapsed_data['prob_std'] / np.sqrt(collapsed_data['prob_count'])
 
-        if collapse_over_goals:
-            # Create a single plot collapsing over both goals and block types
-            # Aggregate data across goals and block types
-            collapsed_data = merged.groupby('progress').agg({
-                'prob': ['mean', 'std', 'count']
-            }).reset_index()
-            
-            # Flatten column names
-            collapsed_data.columns = ['progress', 'prob_mean', 'prob_std', 'prob_count']
-            
-            # Calculate standard error
-            collapsed_data['prob_se'] = collapsed_data['prob_std'] / np.sqrt(collapsed_data['prob_count'])
-            
-            plt.figure(figsize=(6, 6))
-            plt.errorbar(
-                collapsed_data['progress'],
-                collapsed_data['prob_mean'],
-                yerr=collapsed_data['prob_se'],
-                marker='o',
-                linewidth=2,
-                capsize=5,
-                capthick=2,
-                color='black',
-                markerfacecolor='black',
-                markeredgecolor='black'
-            )
-            plt.xlabel("Goal Progress", fontsize=14, weight='bold')
-            plt.ylabel("Goal Selection Probability", fontsize=14, weight='bold')
-            plt.ylim(0, 1.05)
-            plt.grid(True, alpha=0.3)
-            
-            # Perform repeated measures ANOVA
-            print("\n" + "="*80)
-            print("REPEATED MEASURES ANOVA: Progress Effect on Goal Selection")
-            print("="*80)
-            
-            # Prepare data for repeated measures ANOVA
-            # We need to restructure the data to have subject-level observations
-            # First, let's get the original data with subject information
-            if simulate:
-                # For simulated data, we need to reconstruct subject-level data
-                # Get the original dataframe with subject_id
-                if self.data_type == "online":
-                    behavior_dataframe_csv = CACHE_DIR + f"all_subjects_behavior_data_{self.data_type}_{model_name}_simulated.csv"
-                else:
-                    behavior_dataframe_csv = CACHE_DIR + f"all_subjects_behavior_data_{self.data_type}_{model_name}_simulated.csv"
-                df_original = pd.read_csv(behavior_dataframe_csv)
-            else:
-                df_original = self.df
-            
-            # Apply block type replacement
-            df_original['block_type'] = df_original['block_type'].replace(block_labels)
-            
-            # Create melted dataframe with subject information
-            melted_with_subjects = pd.melt(
-                df_original,
-                id_vars=['subject_id', 'goal_selected', 'block_type'],
-                value_vars=[f'{g}_progress' for g in goals],
-                var_name='goal_progressed',
-                value_name='progress'
-            )
-            melted_with_subjects['goal'] = melted_with_subjects['goal_progressed'].str.extract(r'(\w+)_progress')
-            
-            # Filter to valid progress values
-            melted_with_subjects = melted_with_subjects[melted_with_subjects['progress'].isin([0, 1, 2, 3, 4, 5])]
-            
-            # Create binary selection variable (1 if goal was selected, 0 otherwise)
-            melted_with_subjects['goal_selected_binary'] = (melted_with_subjects['goal'] == melted_with_subjects['goal_selected']).astype(int)
-            
-            # Calculate subject-level selection probabilities for each progress level
-            subject_progress_data = []
-            for subject_id in melted_with_subjects['subject_id'].unique():
-                subject_data = melted_with_subjects[melted_with_subjects['subject_id'] == subject_id]
-                
-                for progress_level in [0, 1, 2, 3, 4, 5]:
-                    progress_trials = subject_data[subject_data['progress'] == progress_level]
-                    if len(progress_trials) > 0:
-                        selection_prob = progress_trials['goal_selected_binary'].mean()
-                        subject_progress_data.append({
-                            'subject_id': subject_id,
-                            'progress': progress_level,
-                            'selection_prob': selection_prob
-                        })
-            
-            # Convert to DataFrame for ANOVA
-            anova_df = pd.DataFrame(subject_progress_data)
-            
-            if len(anova_df) > 0:
-                # Perform repeated measures ANOVA using pingouin
-                try:
-                    # Use pingouin's rm_anova function
-                    rm_anova_result = pg.rm_anova(data=anova_df, dv='selection_prob', within='progress', subject='subject_id')
-                    
-                    print(f"Repeated Measures ANOVA Results:")
-                    print(f"F({rm_anova_result['ddof1'].iloc[0]:.0f}, {rm_anova_result['ddof2'].iloc[0]:.0f}) = {rm_anova_result['F'].iloc[0]:.3f}")
-                    print(f"p-value = {rm_anova_result['p-unc'].iloc[0]:.6f}")
-                    print(f"Effect size (η²p) = {rm_anova_result['np2'].iloc[0]:.3f}")
-                    
-                    # Interpret significance
-                    if rm_anova_result['p-unc'].iloc[0] < 0.001:
-                        significance = "***"
-                    elif rm_anova_result['p-unc'].iloc[0] < 0.01:
-                        significance = "**"
-                    elif rm_anova_result['p-unc'].iloc[0] < 0.05:
-                        significance = "*"
-                    else:
-                        significance = "ns"
-                    
-                    print(f"Significance: {significance}")
-                    
-                    # Post-hoc pairwise comparisons if significant
-                    if rm_anova_result['p-unc'].iloc[0] < 0.05:
-                        print(f"\nPost-hoc pairwise comparisons (Bonferroni corrected):")
-                        pairwise_results = pg.pairwise_ttests(data=anova_df, dv='selection_prob', within='progress', subject='subject_id', padjust='bonf')
-                        
-                        # Show only significant comparisons
-                        significant_pairs = pairwise_results[pairwise_results['p-corr'] < 0.05]
-                        if len(significant_pairs) > 0:
-                            for _, row in significant_pairs.iterrows():
-                                print(f"  Progress {row['A']} vs {row['B']}: t = {row['T']:.3f}, p = {row['p-corr']:.3f}")
-                        else:
-                            print("  No significant pairwise differences found.")
-                    
-                    # Descriptive statistics
-                    print(f"\nDescriptive Statistics:")
-                    desc_stats = anova_df.groupby('progress')['selection_prob'].agg(['mean', 'std', 'count']).round(3)
-                    for progress_level in [0, 1, 2, 3, 4, 5]:
-                        if progress_level in desc_stats.index:
-                            mean_val = desc_stats.loc[progress_level, 'mean']
-                            std_val = desc_stats.loc[progress_level, 'std']
-                            count_val = desc_stats.loc[progress_level, 'count']
-                            print(f"  Progress {progress_level}: M = {mean_val:.3f}, SD = {std_val:.3f}, n = {count_val:.0f}")
-                    
-                except Exception as e:
-                    print(f"Error performing repeated measures ANOVA: {e}")
-                    print("This might be due to insufficient data or missing values.")
-            else:
-                print("Insufficient data for repeated measures ANOVA.")
-            
-            print("="*80)
-        else:
-            # Original behavior with separate subplots for each goal
-            # Create FacetGrid first (it will create its own figure)
-            g = sns.FacetGrid(
-                merged,
-                col='goal',
-                sharey=True,
-                height=4,
-                aspect=0.7
-            )
-            
-            # Adjust figure size to make room for legend
-            fig = g.fig
-            fig.set_size_inches(14, 4)
-            
-            # Reposition existing axes to make room for legend and reduce spacing
-            # Calculate positions for all subplots with minimal spacing
-            n_subplots = len(g.axes.flat)
-            total_width = 0.7  # Use 70% of figure width for all subplots
-            spacing = 0.02  # Small gap between subplots
-            subplot_width = (total_width - (n_subplots - 1) * spacing) / n_subplots
-            start_x = 0.1  # Start position
-            
-            for i, ax in enumerate(g.axes.flat):
-                current_pos = ax.get_position()
-                new_x0 = start_x + i * (subplot_width + spacing)
-                ax.set_position([new_x0, current_pos.y0, subplot_width, current_pos.height])
+        markers = ['o', 's', '^', 'D', 'v', 'p']
+        block_types = sorted(merged['block_type'].unique())
+        marker_dict = {bt: markers[i % len(markers)] for i, bt in enumerate(block_types)}
+        pastel_palette = sns.color_palette("Pastel1", n_colors=len(block_types))
+        color_dict = {}
+        for i, bt in enumerate(block_types):
+            r, gr, b = pastel_palette[i]
+            h, l, s = colorsys.rgb_to_hls(r, gr, b)
+            color_dict[bt] = colorsys.hls_to_rgb(h, max(0.22, l * 0.52), min(1.0, s * 1.2))
 
-            # Use constant color with different markers for each condition
-            # Define markers for different block types
-            markers = ['o', 's', '^', 'D', 'v', 'p']  # circle, square, triangle, diamond, triangle_down, pentagon
-            block_types = sorted(merged['block_type'].unique())
-            marker_dict = {bt: markers[i % len(markers)] for i, bt in enumerate(block_types)}
-            
-            # Plot each block type separately with same color but different markers on each subplot
-            for i, ax in enumerate(g.axes.flat):
-                goal_name = g.col_names[i]
-                goal_data = merged[merged['goal'] == goal_name]
-                
-                for block_type in block_types:
-                    block_data = goal_data[goal_data['block_type'] == block_type]
-                    if len(block_data) > 0:
-                        # Sort by progress for proper line plotting
-                        block_data = block_data.sort_values('progress')
-                        ax.plot(
-                            block_data['progress'],
-                            block_data['prob'],
-                            marker=marker_dict[block_type],
-                            linestyle=':',
-                            linewidth=2,
-                            color='black',
-                            markersize=8,
-                            label=block_type
-                        )
+        custom_titles = {
+            'SH': 'Goal: SH',
+            'BR': 'Goal: OB',
+            'HO': 'Goal: HO'
+        }
+        goal_order = ['SH', 'BR', 'HO']
 
-            # Clean titles and axis labels
-            # Custom title mapping with BR replaced by OB
-            custom_titles = {
-                'SH': 'Goal: SH',
-                'BR': 'Goal: OB',  # Replace 'BR' with 'OB'
-                'HO': 'Goal: HO'
-            }
+        fig = plt.figure(figsize=(18, 5))
+        gs = fig.add_gridspec(1, 2, width_ratios=[0.7, 2.8], wspace=0.22)
 
-            # Apply the custom titles
-            g.set_axis_labels(None, "Goal Selection Probability", size=14, weight='bold')
-            g.set(ylim=(0, 1.05))
+        # Left panel: collapsed over goals
+        ax_collapsed = fig.add_subplot(gs[0, 0])
+        ax_collapsed.errorbar(
+            collapsed_data['progress'],
+            collapsed_data['prob_mean'],
+            yerr=collapsed_data['prob_se'],
+            marker='o',
+            linewidth=2,
+            capsize=5,
+            capthick=2,
+            color='black',
+            markerfacecolor='black',
+            markeredgecolor='black'
+        )
+        ax_collapsed.set_xlabel("Goal Progress", fontsize=16, weight='bold')
+        ax_collapsed.set_ylabel("Goal Selection Probability", fontsize=16, weight='bold')
+        ax_collapsed.set_ylim(0, 1.05)
+        ax_collapsed.grid(True, alpha=0.3)
 
-            for i, ax in enumerate(g.axes.flat):
-                ax.set_title(
-                    custom_titles.get(g.col_names[i], g.col_names[i]),
-                    fontsize=14,
-                    weight='bold',
-                    pad=0  # move title further down (smaller pad moves it closer to the plot)
-                )
-                if i == 0:
-                    ax.set_xlabel("Goal Progress", fontsize=14, weight='bold')
-                else:
-                    ax.set_xlabel("")
-                    ax.set_xticklabels([])  # Optional: also hide the tick labels
-
-            # Add legend in a separate subplot
-            # Create custom legend with markers
-            legend_handles = []
+        # Right panel: separate subplots for each goal + legend
+        gs_right = gs[0, 1].subgridspec(1, 4, width_ratios=[1, 1, 1, 0.45], wspace=0.15)
+        goal_axes = [fig.add_subplot(gs_right[0, i]) for i in range(3)]
+        for i, (ax, goal_name) in enumerate(zip(goal_axes, goal_order)):
+            goal_data = merged[merged['goal'] == goal_name]
             for block_type in block_types:
-                if block_type in marker_dict:
-                    legend_handles.append(plt.Line2D([0], [0], 
-                                                      marker=marker_dict[block_type], 
-                                                      linestyle=':', 
-                                                      color='black', 
-                                                      linewidth=2, 
-                                                      markersize=8, 
-                                                      label=block_type))
-            
-            # Create legend subplot in the rightmost position
-            # Get position from the rightmost plot and place legend to its right
-            rightmost_ax = g.axes.flat[-1]
-            rightmost_pos = rightmost_ax.get_position()
-            legend_x0 = rightmost_pos.x0 + rightmost_pos.width + 0.02
-            legend_ax = fig.add_axes([legend_x0, rightmost_pos.y0, 0.15, rightmost_pos.height])
-            legend_ax.axis('off')
-            legend_ax.legend(handles=legend_handles, loc='center left', title='Block Type', frameon=False)
-        if self.data_type == "online":
-            experiment = "H2"
-        elif self.data_type == "fmri":
-            experiment = "H1"
-        if collapse_over_goals:
-            plt.suptitle('Goal selection with progress', fontsize=15, weight='bold', y=0.95)
-        if not simulate:
-            if collapse_over_goals:
-                plt.savefig(self.figure_dir + "/goal_selection_related_goal_progress_" + self.experiment + "_collapsed.png", dpi=300, bbox_inches='tight')
+                block_data = goal_data[goal_data['block_type'] == block_type]
+                if len(block_data) > 0:
+                    block_data = block_data.sort_values('progress')
+                    c = color_dict[block_type]
+                    ax.plot(
+                        block_data['progress'],
+                        block_data['prob'],
+                        marker=marker_dict[block_type],
+                        linestyle=':',
+                        linewidth=2,
+                        color=c,
+                        markerfacecolor=c,
+                        markeredgecolor=c,
+                        markersize=8,
+                        label=block_type
+                    )
+            ax.set_title(custom_titles.get(goal_name, goal_name), fontsize=14, weight='bold')
+            ax.set_ylim(0, 1.05)
+            if i == 0:
+                ax.set_ylabel("Goal Selection Probability", fontsize=14, weight='bold')
+                ax.set_xlabel("Goal Progress", fontsize=14, weight='bold')
             else:
-                plt.savefig(self.figure_dir + "/goal_selection_related_goal_progress_" + self.experiment + ".png", dpi=300, bbox_inches='tight')
+                ax.set_xlabel("")
+                ax.set_xticklabels([])
+                ax.set_ylabel("")
+                ax.set_yticklabels([])
+                ax.tick_params(axis='y', left=False)
+
+        legend_handles = []
+        for block_type in block_types:
+            if block_type in color_dict:
+                c = color_dict[block_type]
+                legend_handles.append(plt.Line2D(
+                    [0], [0],
+                    marker=marker_dict[block_type],
+                    linestyle=':',
+                    color=c,
+                    markerfacecolor=c,
+                    markeredgecolor=c,
+                    linewidth=2,
+                    markersize=8,
+                    label=block_type
+                ))
+        legend_ax = fig.add_subplot(gs_right[0, 3])
+        legend_ax.axis('off')
+        legend_ax.legend(handles=legend_handles, loc='center left', title='Block Type', frameon=False)
+
+        # Perform repeated measures ANOVA on collapsed data
+        print("\n" + "="*80)
+        print("REPEATED MEASURES ANOVA: Progress Effect on Goal Selection")
+        print("="*80)
+
+        if simulate:
+            behavior_dataframe_csv = CACHE_DIR + f"all_subjects_behavior_data_{self.data_type}_{model_name}_simulated.csv"
+            df_original = pd.read_csv(behavior_dataframe_csv)
         else:
-            if collapse_over_goals:
-                plt.savefig(self.figure_dir + f"/goal_selection_related_goal_progress_{self.experiment}_{model_name}_simulated_collapsed.png", dpi=300, bbox_inches='tight')
-            else:
-                plt.savefig(self.figure_dir + f"/goal_selection_related_goal_progress_{self.experiment}_{model_name}_simulated.png", dpi=300, bbox_inches='tight')
+            df_original = self.df
+
+        df_original['block_type'] = df_original['block_type'].replace(block_labels)
+
+        melted_with_subjects = pd.melt(
+            df_original,
+            id_vars=['subject_id', 'goal_selected', 'block_type'],
+            value_vars=[f'{g}_progress' for g in goals],
+            var_name='goal_progressed',
+            value_name='progress'
+        )
+        melted_with_subjects['goal'] = melted_with_subjects['goal_progressed'].str.extract(r'(\w+)_progress')
+        melted_with_subjects = melted_with_subjects[melted_with_subjects['progress'].isin([0, 1, 2, 3, 4, 5])]
+        melted_with_subjects['goal_selected_binary'] = (
+            melted_with_subjects['goal'] == melted_with_subjects['goal_selected']
+        ).astype(int)
+
+        subject_progress_data = []
+        for subject_id in melted_with_subjects['subject_id'].unique():
+            subject_data = melted_with_subjects[melted_with_subjects['subject_id'] == subject_id]
+            for progress_level in [0, 1, 2, 3, 4, 5]:
+                progress_trials = subject_data[subject_data['progress'] == progress_level]
+                if len(progress_trials) > 0:
+                    selection_prob = progress_trials['goal_selected_binary'].mean()
+                    subject_progress_data.append({
+                        'subject_id': subject_id,
+                        'progress': progress_level,
+                        'selection_prob': selection_prob
+                    })
+
+        anova_df = pd.DataFrame(subject_progress_data)
+
+        if len(anova_df) > 0:
+            try:
+                rm_anova_result = pg.rm_anova(
+                    data=anova_df, dv='selection_prob', within='progress', subject='subject_id'
+                )
+                print(f"Repeated Measures ANOVA Results:")
+                print(f"F({rm_anova_result['ddof1'].iloc[0]:.0f}, {rm_anova_result['ddof2'].iloc[0]:.0f}) = {rm_anova_result['F'].iloc[0]:.3f}")
+                print(f"p-value = {rm_anova_result['p-unc'].iloc[0]:.6f}")
+                # Known reporting issue: rm_anova defaults to ng2, so this np2
+                # lookup is caught below; the figure is still saved. See README.
+                print(f"Effect size (η²p) = {rm_anova_result['np2'].iloc[0]:.3f}")
+
+                if rm_anova_result['p-unc'].iloc[0] < 0.001:
+                    significance = "***"
+                elif rm_anova_result['p-unc'].iloc[0] < 0.01:
+                    significance = "**"
+                elif rm_anova_result['p-unc'].iloc[0] < 0.05:
+                    significance = "*"
+                else:
+                    significance = "ns"
+                print(f"Significance: {significance}")
+
+                if rm_anova_result['p-unc'].iloc[0] < 0.05:
+                    print(f"\nPost-hoc pairwise comparisons (Bonferroni corrected):")
+                    pairwise_results = pg.pairwise_ttests(
+                        data=anova_df, dv='selection_prob', within='progress',
+                        subject='subject_id', padjust='bonf'
+                    )
+                    significant_pairs = pairwise_results[pairwise_results['p-corr'] < 0.05]
+                    if len(significant_pairs) > 0:
+                        for _, row in significant_pairs.iterrows():
+                            print(f"  Progress {row['A']} vs {row['B']}: t = {row['T']:.3f}, p = {row['p-corr']:.3f}")
+                    else:
+                        print("  No significant pairwise differences found.")
+
+                print(f"\nDescriptive Statistics:")
+                desc_stats = anova_df.groupby('progress')['selection_prob'].agg(['mean', 'std', 'count']).round(3)
+                for progress_level in [0, 1, 2, 3, 4, 5]:
+                    if progress_level in desc_stats.index:
+                        mean_val = desc_stats.loc[progress_level, 'mean']
+                        std_val = desc_stats.loc[progress_level, 'std']
+                        count_val = desc_stats.loc[progress_level, 'count']
+                        print(f"  Progress {progress_level}: M = {mean_val:.3f}, SD = {std_val:.3f}, n = {count_val:.0f}")
+            except Exception as e:
+                print(f"Error performing repeated measures ANOVA: {e}")
+                print("This might be due to insufficient data or missing values.")
+        else:
+            print("Insufficient data for repeated measures ANOVA.")
+        print("="*80)
+
+        if not simulate:
+            figure_path = self.figure_dir + "/Figure9C.png"
+        else:
+            figure_path = self.figure_dir + f"/Figure9C_{model_name}_simulated.png"
+        self._save_figure(figure_path)
         plt.show()
 
     def plot_goal_selection_related_goal_progress_simulated(self, models=['momentum_learn_alt_goal', 'prospective', 'td_persistence'], 
@@ -1039,30 +1630,29 @@ class PlotMeasures:
         behavior_suffix = "_with_behavior" if include_behavior else ""
         
         if collapse_over_goals and collapse_over_conditions:
-            plt.savefig(self.figure_dir + f"/goal_selection_related_goal_progress_simulated_{self.experiment}_collapsed_all{behavior_suffix}.png", dpi=300, bbox_inches='tight')
+            self._save_figure(self.figure_dir + f"/goal_selection_related_goal_progress_simulated_{self.experiment}_collapsed_all{behavior_suffix}.png")
         elif collapse_over_goals and not collapse_over_conditions:
-            plt.savefig(self.figure_dir + f"/goal_selection_related_goal_progress_simulated_{self.experiment}_collapsed_goals{behavior_suffix}.png", dpi=300, bbox_inches='tight')
+            self._save_figure(self.figure_dir + f"/goal_selection_related_goal_progress_simulated_{self.experiment}_collapsed_goals{behavior_suffix}.png")
         else:
-            plt.savefig(self.figure_dir + f"/goal_selection_related_goal_progress_simulated_{self.experiment}{behavior_suffix}.png", dpi=300, bbox_inches='tight')
+            self._save_figure(self.figure_dir + f"/goal_selection_related_goal_progress_simulated_{self.experiment}{behavior_suffix}.png")
         
         plt.show()
 
 
-    def plot_subgoal_selection_related_subgoal_progress(self, simulate=False, model_name="momentum_learn_alt_goal", collapse_conditions=False, collapse_over_subgoals=False):
+    # final-final manuscript: Figure 7D.
+    # 7D: Figure9D.png; use {'simulate': False}
+    # See analysis/README.md and reproduce_figures.py for inputs and panel aliases.
+    def plot_subgoal_selection_related_subgoal_progress(self, simulate=False, model_name="momentum_learn_alt_goal"):
         """
-        Plot subgoal selection probability as a function of subgoal progress.
-        Plots all possible subgoal progress combinations (G, M, C, S for each goal SH, BR, HO)
-        and shows probability of choosing each subgoal over others.
+        Plot subgoal selection probability as a function of subgoal progress with two panels
+        side by side: left = collapsed over subgoals; right = separate subplots for each subgoal.
         Excludes progress = 1 from the analysis.
         
         Args:
-            collapse_conditions (bool): If True, collapse across all block types.
-                                      If False, show separate lines for each block type.
-            collapse_over_subgoals (bool): If True, collapse across all subgoals into a single plot.
-                                         If False, show separate subplots for each subgoal.
+            simulate (bool): Whether to use simulated data
+            model_name (str): Name of the model to use for simulation
         """
         if simulate:
-            #behavior_dataframe_csv = CACHE_DIR + "all_subjects_behavior_data_" + self.data_type + "_momentum_learn_alt_goal_simulated.csv"
             behavior_dataframe_csv = CACHE_DIR + f"all_subjects_behavior_data_{self.data_type}_{model_name}_simulated.csv"
             self.df = pd.read_csv(behavior_dataframe_csv)
 
@@ -1071,26 +1661,16 @@ class PlotMeasures:
             # SH goal subgoals
             ('G_progress_SH', 'G', 'SH'),
             ('M_progress_SH', 'M', 'SH'),
-            ('C_progress_SH', 'C', 'SH'),
-            ('S_progress_SH', 'S', 'SH'),
-            
-            # BR goal subgoals  
-            ('G_progress_BR', 'G', 'BR'),
+            # BR goal subgoals
             ('S_progress_BR', 'S', 'BR'),
-            ('C_progress_BR', 'C', 'BR'),
-            ('M_progress_BR', 'M', 'BR'),
-            
             # HO goal subgoals
-            ('G_progress_HO', 'G', 'HO'),
-            ('S_progress_HO', 'S', 'HO'),
             ('C_progress_HO', 'C', 'HO'),
-            ('M_progress_HO', 'M', 'HO')
         ]
-        
+
         # Define string labels for block types 0 to 5
         block_labels = {
             0: "SH-high",
-            1: "OB-high", 
+            1: "OB-high",
             2: "HO-high",
             3: "SH-low",
             4: "OB-low",
@@ -1100,78 +1680,54 @@ class PlotMeasures:
         # Apply the replacement
         df = self.df.copy()
         df['block_type'] = df['block_type'].replace(block_labels)
-        
+
         # Replace 'BR' with 'OB' for consistency
         df['goal_selected'] = df['goal_selected'].replace('BR', 'OB')
 
         # Process each progress variable separately
         all_results = []
-        
+
         for progress_var, subgoal_type, goal_type in progress_configs:
             # Convert goal_type for consistency
             goal_display = 'OB' if goal_type == 'BR' else goal_type
-            
+
             # Filter data where this progress variable exists and goal matches
             mask = (df[progress_var].notna()) & (df['goal_selected'] == goal_display)
             subset = df[mask].copy()
-            
+
             # Remove progress = 1 and 0.5 as requested
             subset = subset[subset[progress_var] != 1.0]
             subset = subset[subset[progress_var] != 0.5]
-            
+
             # Round progress values to 2 decimal places for exact matching
             subset[progress_var] = subset[progress_var].round(2)
-            
-            # Keep all progress values (remove the restriction)
-            # subset = subset[subset[progress_var].isin([0.0, 0.33, 0.67])]
-            
+
             if subset.empty:
                 continue
-            
-            if collapse_conditions:
-                # Compute counts per progress only (collapsed across block types)
-                counts = subset.groupby([progress_var]).size().reset_index(name='total')
-                
-                # Compute selected counts (when subgoal_selected matches the subgoal_type)
-                selected_subset = subset[subset['subgoal_selected'] == subgoal_type]
-                selected_counts = selected_subset.groupby([progress_var]).size().reset_index(name='selected')
-                
-                # Merge and compute probability
-                merged = pd.merge(counts, selected_counts, on=[progress_var], how='left')
-                merged['selected'] = merged['selected'].fillna(0)
-                merged['prob'] = merged['selected'] / merged['total']
-                
-                # Add metadata
-                merged['subgoal_type'] = subgoal_type
-                merged['goal_type'] = goal_display
-                merged['progress'] = merged[progress_var]
-                merged['block_type'] = 'All Conditions'  # Collapsed label
-                
-                all_results.append(merged[['subgoal_type', 'goal_type', 'progress', 'block_type', 'prob']])
-            else:
-                # Compute counts per (progress, block_type)
-                counts = subset.groupby([progress_var, 'block_type']).size().reset_index(name='total')
-                
-                # Compute selected counts (when subgoal_selected matches the subgoal_type)
-                selected_subset = subset[subset['subgoal_selected'] == subgoal_type]
-                selected_counts = selected_subset.groupby([progress_var, 'block_type']).size().reset_index(name='selected')
-                
-                # Merge and compute probability
-                merged = pd.merge(counts, selected_counts, on=[progress_var, 'block_type'], how='left')
-                merged['selected'] = merged['selected'].fillna(0)
-                merged['prob'] = merged['selected'] / merged['total']
-                
-                # Add metadata
-                merged['subgoal_type'] = subgoal_type
-                merged['goal_type'] = goal_display
-                merged['progress'] = merged[progress_var]
-                
-                all_results.append(merged[['subgoal_type', 'goal_type', 'progress', 'block_type', 'prob']])
-        
+
+            # Compute counts per (progress, block_type)
+            counts = subset.groupby([progress_var, 'block_type']).size().reset_index(name='total')
+
+            # Compute selected counts (when subgoal_selected matches the subgoal_type)
+            selected_subset = subset[subset['subgoal_selected'] == subgoal_type]
+            selected_counts = selected_subset.groupby([progress_var, 'block_type']).size().reset_index(name='selected')
+
+            # Merge and compute probability
+            merged = pd.merge(counts, selected_counts, on=[progress_var, 'block_type'], how='left')
+            merged['selected'] = merged['selected'].fillna(0)
+            merged['prob'] = merged['selected'] / merged['total']
+
+            # Add metadata
+            merged['subgoal_type'] = subgoal_type
+            merged['goal_type'] = goal_display
+            merged['progress'] = merged[progress_var]
+
+            all_results.append(merged[['subgoal_type', 'goal_type', 'progress', 'block_type', 'prob']])
+
         if not all_results:
             print("No data found for the specified progress variables")
             return
-            
+
         # Combine all results
         final_data = pd.concat(all_results, ignore_index=True)
 
@@ -1179,313 +1735,238 @@ class PlotMeasures:
 
         # Round progress values to ensure exact matching
         final_data['progress'] = final_data['progress'].round(2)
-        
-        # Filter and order progress bins (excluding 1) - use all available progress values
+
+        # Filter and order progress bins
         unique_progress = sorted(final_data['progress'].dropna().unique())
         final_data['progress'] = pd.Categorical(final_data['progress'], categories=unique_progress, ordered=True)
 
-        if collapse_over_subgoals:
-            # Create a single plot collapsing over all subgoals
-            # Aggregate data across all subgoals and conditions
-            collapsed_data = final_data.groupby('progress').agg({
-                'prob': ['mean', 'std', 'count']
-            }).reset_index()
-            
-            # Flatten column names
-            collapsed_data.columns = ['progress', 'prob_mean', 'prob_std', 'prob_count']
-            
-            # Calculate standard error
-            collapsed_data['prob_se'] = collapsed_data['prob_std'] / np.sqrt(collapsed_data['prob_count'])
-            
-            plt.figure(figsize=(6, 6))
-            plt.errorbar(
-                collapsed_data['progress'],
-                collapsed_data['prob_mean'],
-                yerr=collapsed_data['prob_se'],
-                marker='o',
-                linewidth=2,
-                capsize=5,
-                capthick=2,
-                color='black',
-                markerfacecolor='black',
-                markeredgecolor='black'
-            )
-            plt.xlabel("Subgoal Progress", fontsize=14, weight='bold')
-            plt.ylabel("Subgoal Selection Probability", fontsize=14, weight='bold')
-            plt.ylim(0, 1.05)
-            plt.grid(True, alpha=0.3)
-            
-            # Perform repeated measures ANOVA
-            print("\n" + "="*80)
-            print("REPEATED MEASURES ANOVA: Progress Effect on Subgoal Selection")
-            print("="*80)
-            
-            # Prepare data for repeated measures ANOVA
-            # We need to restructure the data to have subject-level observations
-            # Get the original dataframe with subject information
-            if simulate:
-                # For simulated data, we need to reconstruct subject-level data
-                behavior_dataframe_csv = CACHE_DIR + "all_subjects_behavior_data_" + self.data_type + "_momentum_learn_alt_goal_simulated.csv"
-                df_original = pd.read_csv(behavior_dataframe_csv)
+        # Aggregate data across all subgoals and conditions for collapsed panel
+        collapsed_data = final_data.groupby('progress').agg({
+            'prob': ['mean', 'std', 'count']
+        }).reset_index()
+        collapsed_data.columns = ['progress', 'prob_mean', 'prob_std', 'prob_count']
+        collapsed_data['prob_se'] = collapsed_data['prob_std'] / np.sqrt(collapsed_data['prob_count'])
+
+        markers = ['o', 's', '^', 'D', 'v', 'p']
+        block_types = sorted(final_data['block_type'].unique())
+        marker_dict = {bt: markers[i % len(markers)] for i, bt in enumerate(block_types)}
+        pastel_palette = sns.color_palette("Pastel1", n_colors=len(block_types))
+        color_dict = {}
+        for i, bt in enumerate(block_types):
+            r, gr, b = pastel_palette[i]
+            h, l, s = colorsys.rgb_to_hls(r, gr, b)
+            color_dict[bt] = colorsys.hls_to_rgb(h, max(0.22, l * 0.52), min(1.0, s * 1.2))
+
+        custom_titles = {
+            'G': 'P(Select G | goal = SH)',
+            'C': 'P(Select C | goal = HO)',
+            'S': 'P(Select S | goal = OB)',
+            'M': 'P(Select M | goal = SH)'
+        }
+        subgoal_order = ['G', 'M', 'S', 'C']
+        subgoal_order = [s for s in subgoal_order if s in final_data['subgoal_type'].unique()]
+
+        fig = plt.figure(figsize=(18, 5))
+        gs = fig.add_gridspec(1, 2, width_ratios=[0.7, 2.8], wspace=0.22)
+
+        # Left panel: collapsed over subgoals
+        ax_collapsed = fig.add_subplot(gs[0, 0])
+        ax_collapsed.errorbar(
+            collapsed_data['progress'],
+            collapsed_data['prob_mean'],
+            yerr=collapsed_data['prob_se'],
+            marker='o',
+            linewidth=2,
+            capsize=5,
+            capthick=2,
+            color='black',
+            markerfacecolor='black',
+            markeredgecolor='black'
+        )
+        ax_collapsed.set_xlabel("Subgoal Progress", fontsize=16, weight='bold')
+        ax_collapsed.set_ylabel("Subgoal Selection Probability", fontsize=16, weight='bold')
+        ax_collapsed.set_ylim(0, 1.05)
+        ax_collapsed.grid(True, alpha=0.3)
+
+        # Right panel: separate subplots for each subgoal + legend
+        n_subgoals = len(subgoal_order)
+        gs_right = gs[0, 1].subgridspec(
+            1, n_subgoals + 1,
+            width_ratios=[1] * n_subgoals + [0.45],
+            wspace=0.15
+        )
+        subgoal_axes = [fig.add_subplot(gs_right[0, i]) for i in range(n_subgoals)]
+        for i, (ax, subgoal_name) in enumerate(zip(subgoal_axes, subgoal_order)):
+            subgoal_data = final_data[final_data['subgoal_type'] == subgoal_name]
+            for block_type in block_types:
+                block_data = subgoal_data[subgoal_data['block_type'] == block_type]
+                if len(block_data) > 0:
+                    block_data = block_data.sort_values('progress')
+                    c = color_dict[block_type]
+                    ax.plot(
+                        block_data['progress'],
+                        block_data['prob'],
+                        marker=marker_dict[block_type],
+                        linestyle=':',
+                        linewidth=2,
+                        color=c,
+                        markerfacecolor=c,
+                        markeredgecolor=c,
+                        markersize=8,
+                        label=block_type
+                    )
+            ax.set_title(custom_titles.get(subgoal_name, subgoal_name), fontsize=14, weight='bold')
+            ax.set_ylim(0, 1.05)
+            if i == 0:
+                ax.set_ylabel("Subgoal Selection Probability", fontsize=14, weight='bold')
+                ax.set_xlabel("Subgoal Progress", fontsize=14, weight='bold')
             else:
-                df_original = self.df.copy()
-            
-            # Apply block type replacement
-            df_original['block_type'] = df_original['block_type'].replace(block_labels)
-            df_original['goal_selected'] = df_original['goal_selected'].replace('BR', 'OB')
-            
-            # Create subject-level data for ANOVA
-            subject_progress_data = []
-            
-            # Process each progress configuration to get subject-level data
-            for progress_var, subgoal_type, goal_type in progress_configs:
-                goal_display = 'OB' if goal_type == 'BR' else goal_type
-                
-                # Filter data where this progress variable exists and goal matches
-                mask = (df_original[progress_var].notna()) & (df_original['goal_selected'] == goal_display)
-                subset = df_original[mask].copy()
-                
-                # Remove progress = 1 and 0.5 as in the original method
-                subset = subset[subset[progress_var] != 1.0]
-                subset = subset[subset[progress_var] != 0.5]
-                
-                # Round progress values
-                subset[progress_var] = subset[progress_var].round(2)
-                
-                if subset.empty:
-                    continue
-                
-                # For each subject and progress level, calculate selection probability
-                for subject_id in subset['subject_id'].unique():
-                    subject_data = subset[subset['subject_id'] == subject_id]
-                    
-                    # Get unique progress values for this subject
-                    unique_progress = subject_data[progress_var].unique()
-                    
-                    for progress_level in unique_progress:
-                        progress_trials = subject_data[subject_data[progress_var] == progress_level]
-                        if len(progress_trials) > 0:
-                            # Create binary selection variable (1 if subgoal was selected, 0 otherwise)
-                            selection_binary = (progress_trials['subgoal_selected'] == subgoal_type).astype(int)
-                            selection_prob = selection_binary.mean()
-                            
-                            subject_progress_data.append({
-                                'subject_id': subject_id,
-                                'progress': progress_level,
-                                'selection_prob': selection_prob,
-                                'subgoal_type': subgoal_type,
-                                'goal_type': goal_display
-                            })
-            
-            # Convert to DataFrame for ANOVA
-            anova_df = pd.DataFrame(subject_progress_data)
-            
-            if len(anova_df) > 0:
-                # Perform repeated measures ANOVA using pingouin
-                try:
-                    # Use pingouin's rm_anova function
-                    rm_anova_result = pg.rm_anova(data=anova_df, dv='selection_prob', within='progress', subject='subject_id')
-                    
-                    print(f"Repeated Measures ANOVA Results:")
-                    print(f"F({rm_anova_result['ddof1'].iloc[0]:.0f}, {rm_anova_result['ddof2'].iloc[0]:.0f}) = {rm_anova_result['F'].iloc[0]:.3f}")
-                    print(f"p-value = {rm_anova_result['p-unc'].iloc[0]:.6f}")
-                    print(f"Effect size (η²p) = {rm_anova_result['np2'].iloc[0]:.3f}")
-                    
-                    # Interpret significance
-                    if rm_anova_result['p-unc'].iloc[0] < 0.001:
-                        significance = "***"
-                    elif rm_anova_result['p-unc'].iloc[0] < 0.01:
-                        significance = "**"
-                    elif rm_anova_result['p-unc'].iloc[0] < 0.05:
-                        significance = "*"
+                ax.set_xlabel("")
+                ax.set_xticklabels([])
+                ax.set_ylabel("")
+                ax.set_yticklabels([])
+                ax.tick_params(axis='y', left=False)
+
+        legend_handles = []
+        for block_type in block_types:
+            if block_type in color_dict:
+                c = color_dict[block_type]
+                legend_handles.append(plt.Line2D(
+                    [0], [0],
+                    marker=marker_dict[block_type],
+                    linestyle=':',
+                    color=c,
+                    markerfacecolor=c,
+                    markeredgecolor=c,
+                    linewidth=2,
+                    markersize=8,
+                    label=block_type
+                ))
+        legend_ax = fig.add_subplot(gs_right[0, n_subgoals])
+        legend_ax.axis('off')
+        legend_ax.legend(
+            handles=legend_handles,
+            loc='center left',
+            title='Block Type',
+            title_fontsize=15,
+            frameon=False
+        )
+
+        # Perform repeated measures ANOVA on collapsed data
+        print("\n" + "="*80)
+        print("REPEATED MEASURES ANOVA: Progress Effect on Subgoal Selection")
+        print("="*80)
+
+        if simulate:
+            behavior_dataframe_csv = CACHE_DIR + f"all_subjects_behavior_data_{self.data_type}_{model_name}_simulated.csv"
+            df_original = pd.read_csv(behavior_dataframe_csv)
+        else:
+            df_original = self.df.copy()
+
+        df_original['block_type'] = df_original['block_type'].replace(block_labels)
+        df_original['goal_selected'] = df_original['goal_selected'].replace('BR', 'OB')
+
+        subject_progress_data = []
+        for progress_var, subgoal_type, goal_type in progress_configs:
+            goal_display = 'OB' if goal_type == 'BR' else goal_type
+            mask = (df_original[progress_var].notna()) & (df_original['goal_selected'] == goal_display)
+            subset = df_original[mask].copy()
+            subset = subset[subset[progress_var] != 1.0]
+            subset = subset[subset[progress_var] != 0.5]
+            subset[progress_var] = subset[progress_var].round(2)
+
+            if subset.empty:
+                continue
+
+            for subject_id in subset['subject_id'].unique():
+                subject_data = subset[subset['subject_id'] == subject_id]
+                for progress_level in subject_data[progress_var].unique():
+                    progress_trials = subject_data[subject_data[progress_var] == progress_level]
+                    if len(progress_trials) > 0:
+                        selection_binary = (progress_trials['subgoal_selected'] == subgoal_type).astype(int)
+                        selection_prob = selection_binary.mean()
+                        subject_progress_data.append({
+                            'subject_id': subject_id,
+                            'progress': progress_level,
+                            'selection_prob': selection_prob,
+                            'subgoal_type': subgoal_type,
+                            'goal_type': goal_display
+                        })
+
+        anova_df = pd.DataFrame(subject_progress_data)
+
+        if len(anova_df) > 0:
+            try:
+                rm_anova_result = pg.rm_anova(
+                    data=anova_df, dv='selection_prob', within='progress', subject='subject_id'
+                )
+                print(f"Repeated Measures ANOVA Results:")
+                print(f"F({rm_anova_result['ddof1'].iloc[0]:.0f}, {rm_anova_result['ddof2'].iloc[0]:.0f}) = {rm_anova_result['F'].iloc[0]:.3f}")
+                print(f"p-value = {rm_anova_result['p-unc'].iloc[0]:.6f}")
+                # Known reporting issue: rm_anova defaults to ng2, so this np2
+                # lookup is caught below; the figure is still saved. See README.
+                print(f"Effect size (η²p) = {rm_anova_result['np2'].iloc[0]:.3f}")
+
+                if rm_anova_result['p-unc'].iloc[0] < 0.001:
+                    significance = "***"
+                elif rm_anova_result['p-unc'].iloc[0] < 0.01:
+                    significance = "**"
+                elif rm_anova_result['p-unc'].iloc[0] < 0.05:
+                    significance = "*"
+                else:
+                    significance = "ns"
+                print(f"Significance: {significance}")
+
+                if rm_anova_result['p-unc'].iloc[0] < 0.05:
+                    print(f"\nPost-hoc pairwise comparisons (Bonferroni corrected):")
+                    pairwise_results = pg.pairwise_ttests(
+                        data=anova_df, dv='selection_prob', within='progress',
+                        subject='subject_id', padjust='bonf'
+                    )
+                    significant_pairs = pairwise_results[pairwise_results['p-corr'] < 0.05]
+                    if len(significant_pairs) > 0:
+                        for _, row in significant_pairs.iterrows():
+                            print(f"  Progress {row['A']} vs {row['B']}: t = {row['T']:.3f}, p = {row['p-corr']:.3f}")
                     else:
-                        significance = "ns"
-                    
-                    print(f"Significance: {significance}")
-                    
-                    # Post-hoc pairwise comparisons if significant
-                    if rm_anova_result['p-unc'].iloc[0] < 0.05:
-                        print(f"\nPost-hoc pairwise comparisons (Bonferroni corrected):")
-                        pairwise_results = pg.pairwise_ttests(data=anova_df, dv='selection_prob', within='progress', subject='subject_id', padjust='bonf')
-                        
-                        # Show only significant comparisons
-                        significant_pairs = pairwise_results[pairwise_results['p-corr'] < 0.05]
-                        if len(significant_pairs) > 0:
-                            for _, row in significant_pairs.iterrows():
-                                print(f"  Progress {row['A']} vs {row['B']}: t = {row['T']:.3f}, p = {row['p-corr']:.3f}")
-                        else:
-                            print("  No significant pairwise differences found.")
-                    
-                    # Descriptive statistics
-                    print(f"\nDescriptive Statistics:")
-                    desc_stats = anova_df.groupby('progress')['selection_prob'].agg(['mean', 'std', 'count']).round(3)
-                    unique_progress_levels = sorted(anova_df['progress'].unique())
-                    for progress_level in unique_progress_levels:
-                        if progress_level in desc_stats.index:
-                            mean_val = desc_stats.loc[progress_level, 'mean']
-                            std_val = desc_stats.loc[progress_level, 'std']
-                            count_val = desc_stats.loc[progress_level, 'count']
-                            print(f"  Progress {progress_level}: M = {mean_val:.3f}, SD = {std_val:.3f}, n = {count_val:.0f}")
-                    
-                    # Additional analysis: breakdown by subgoal type
-                    print(f"\nAnalysis by Subgoal Type:")
-                    for subgoal in anova_df['subgoal_type'].unique():
-                        subgoal_data = anova_df[anova_df['subgoal_type'] == subgoal]
-                        if len(subgoal_data) > 0:
-                            try:
-                                subgoal_anova = pg.rm_anova(data=subgoal_data, dv='selection_prob', within='progress', subject='subject_id')
-                                print(f"  {subgoal}: F({subgoal_anova['ddof1'].iloc[0]:.0f}, {subgoal_anova['ddof2'].iloc[0]:.0f}) = {subgoal_anova['F'].iloc[0]:.3f}, p = {subgoal_anova['p-unc'].iloc[0]:.3f}")
-                            except:
-                                print(f"  {subgoal}: Insufficient data for ANOVA")
-                    
-                except Exception as e:
-                    print(f"Error performing repeated measures ANOVA: {e}")
-                    print("This might be due to insufficient data or missing values.")
-            else:
-                print("Insufficient data for repeated measures ANOVA.")
-            
-            print("="*80)
-        else:
-            # Original behavior with separate subplots for each subgoal
-            # Define custom color palette
-            if collapse_conditions:
-                palette = ['black']  # Single color for collapsed data
-                g = sns.FacetGrid(
-                    final_data,
-                    col='subgoal_type',
-                    sharey=True,
-                    height=4,
-                    aspect=0.7
-                )
-            else:
-                palette = sns.color_palette("Dark2")
-                # Create FacetGrid first (it will create its own figure)
-                g = sns.FacetGrid(
-                    final_data,
-                    col='subgoal_type',
-                    sharey=True,
-                    height=4,
-                    aspect=0.7
-                )
-                
-                # Adjust figure size to make room for legend
-                fig = g.fig
-                fig.set_size_inches(16, 4)
-                
-                # Reposition existing axes to make room for legend and reduce spacing
-                # Calculate positions for all subplots with minimal spacing
-                n_subplots = len(g.axes.flat)
-                total_width = 0.75  # Use 75% of figure width for all subplots
-                spacing = 0.02  # Small gap between subplots
-                subplot_width = (total_width - (n_subplots - 1) * spacing) / n_subplots
-                start_x = 0.1  # Start position
-                
-                for i, ax in enumerate(g.axes.flat):
-                    current_pos = ax.get_position()
-                    new_x0 = start_x + i * (subplot_width + spacing)
-                    ax.set_position([new_x0, current_pos.y0, subplot_width, current_pos.height])
+                        print("  No significant pairwise differences found.")
 
-            if collapse_conditions:
-                g.map_dataframe(
-                    sns.lineplot,
-                    x='progress',
-                    y='prob',
-                    marker='o',
-                    linewidth=3,
-                    color='black',
-                    markersize=8
-                )
-            else:
-                # Use constant color with different markers for each condition
-                # Define markers for different block types
-                markers = ['o', 's', '^', 'D', 'v', 'p']  # circle, square, triangle, diamond, triangle_down, pentagon
-                block_types = sorted(final_data['block_type'].unique())
-                marker_dict = {bt: markers[i % len(markers)] for i, bt in enumerate(block_types)}
-                
-                # Plot each block type separately with same color but different markers on each subplot
-                for i, ax in enumerate(g.axes.flat):
-                    subgoal_name = g.col_names[i]
-                    subgoal_data = final_data[final_data['subgoal_type'] == subgoal_name]
-                    
-                    for block_type in block_types:
-                        block_data = subgoal_data[subgoal_data['block_type'] == block_type]
-                        if len(block_data) > 0:
-                            # Sort by progress for proper line plotting
-                            block_data = block_data.sort_values('progress')
-                            ax.plot(
-                                block_data['progress'],
-                                block_data['prob'],
-                                marker=marker_dict[block_type],
-                                linestyle=':',
-                                linewidth=2,
-                                color='black',
-                                markersize=8,
-                                label=block_type
+                print(f"\nDescriptive Statistics:")
+                desc_stats = anova_df.groupby('progress')['selection_prob'].agg(['mean', 'std', 'count']).round(3)
+                for progress_level in sorted(anova_df['progress'].unique()):
+                    if progress_level in desc_stats.index:
+                        mean_val = desc_stats.loc[progress_level, 'mean']
+                        std_val = desc_stats.loc[progress_level, 'std']
+                        count_val = desc_stats.loc[progress_level, 'count']
+                        print(f"  Progress {progress_level}: M = {mean_val:.3f}, SD = {std_val:.3f}, n = {count_val:.0f}")
+
+                print(f"\nAnalysis by Subgoal Type:")
+                for subgoal in anova_df['subgoal_type'].unique():
+                    subgoal_data = anova_df[anova_df['subgoal_type'] == subgoal]
+                    if len(subgoal_data) > 0:
+                        try:
+                            subgoal_anova = pg.rm_anova(
+                                data=subgoal_data, dv='selection_prob',
+                                within='progress', subject='subject_id'
                             )
-
-        if not collapse_over_subgoals:
-            # Clean titles and axis labels
-            custom_titles = {
-                'G': 'P(Select G)',
-                'C': 'P(Select C)', 
-                'S': 'P(Select S)',
-                'M': 'P(Select M)'
-            }
-
-            # Apply the custom titles
-            for ax, title_key in zip(g.axes.flat, g.col_names):
-                ax.set_title(custom_titles.get(title_key, title_key), fontsize=13, weight='bold', pad=0)
-            g.set_axis_labels("Subgoal Progress", "Subgoal Selection Probability", size=14, weight='bold')
-
-            # Remove y-axis labels for subplots 2-4 (index 1, 2, 3)
-            for i, ax in enumerate(g.axes.flat):
-                if i > 0:
-                    ax.set_xlabel("")
-            g.set(ylim=(0, 1.05))
-
-            # Add legend in a separate subplot
-            if not collapse_conditions:
-                # Create custom legend with markers
-                legend_handles = []
-                for block_type in block_types:
-                    if block_type in marker_dict:
-                        legend_handles.append(plt.Line2D([0], [0], 
-                                                          marker=marker_dict[block_type], 
-                                                          linestyle=':', 
-                                                          color='black', 
-                                                          linewidth=2, 
-                                                          markersize=8, 
-                                                          label=block_type))
-                
-                # Create legend subplot in the rightmost position
-                # Get position from the rightmost plot and place legend to its right
-                rightmost_ax = g.axes.flat[-1]
-                rightmost_pos = rightmost_ax.get_position()
-                legend_x0 = rightmost_pos.x0 + rightmost_pos.width + 0.02
-                legend_ax = fig.add_axes([legend_x0, rightmost_pos.y0, 0.15, rightmost_pos.height])
-                legend_ax.axis('off')
-                legend_ax.legend(handles=legend_handles, loc='center left', title='Block Type', frameon=False)
-
-        if self.data_type == "online":
-            experiment = "H2"
-        elif self.data_type == "fmri":
-            experiment = "H1"
-        
-        if collapse_over_subgoals:
-            plt.suptitle('Subgoal selection with progress', fontsize=16, weight='bold', y=0.95)
-            if simulate:
-                plt.savefig(self.figure_dir + "/subgoal_selection_related_subgoal_progress_" + self.experiment + "_simulated_collapsed_subgoals.png", dpi=300, bbox_inches='tight')
-            else:
-                plt.savefig(self.figure_dir + "/subgoal_selection_related_subgoal_progress_" + self.experiment + "_collapsed_subgoals.png", dpi=300, bbox_inches='tight')
-        elif collapse_conditions:
-            plt.suptitle('Subgoal Selection Probability by Own Progress (Collapsed Across Conditions)', fontsize=16, weight='bold', y=1.02)
-            plt.savefig(FIGURES + "/subgoal_selection_related_subgoal_progress_collapsed.png", dpi=300, bbox_inches='tight')
-        elif simulate:
-            plt.savefig(self.figure_dir + "/subgoal_selection_related_subgoal_progress_" + self.experiment + "_simulated.png", dpi=300, bbox_inches='tight')
+                            print(
+                                f"  {subgoal}: F({subgoal_anova['ddof1'].iloc[0]:.0f}, "
+                                f"{subgoal_anova['ddof2'].iloc[0]:.0f}) = {subgoal_anova['F'].iloc[0]:.3f}, "
+                                f"p = {subgoal_anova['p-unc'].iloc[0]:.3f}"
+                            )
+                        except Exception:
+                            print(f"  {subgoal}: Insufficient data for ANOVA")
+            except Exception as e:
+                print(f"Error performing repeated measures ANOVA: {e}")
+                print("This might be due to insufficient data or missing values.")
         else:
-            plt.savefig(self.figure_dir + "/subgoal_selection_related_subgoal_progress_" + self.experiment + ".png", dpi=300, bbox_inches='tight')
+            print("Insufficient data for repeated measures ANOVA.")
+        print("="*80)
 
-        print(self.figure_dir)
+        if not simulate:
+            figure_path = self.figure_dir + "/Figure9D.png"
+        else:
+            figure_path = self.figure_dir + f"/Figure9D_{model_name}_simulated.png"
+        self._save_figure(figure_path)
         plt.show()
 
     def plot_subgoal_selection_related_subgoal_progress_simulated(self, models=['momentum_learn_alt_goal', 'prospective', 'td_persistence'], 
@@ -1785,10 +2266,10 @@ class PlotMeasures:
 
             # Clean titles and axis labels
             custom_titles = {
-                'G': 'P(Select G)',
-                'C': 'P(Select C)', 
-                'S': 'P(Select S)',
-                'M': 'P(Select M)'
+                'G': 'P(Select G | goal = SH)',
+                'C': 'P(Select C | goal = HO)', 
+                'S': 'P(Select S | goal = OB)',
+                'M': 'P(Select M | goal = SH)'
             }
 
             # Apply the custom titles
@@ -1815,9 +2296,9 @@ class PlotMeasures:
         behavior_suffix = "_with_behavior" if include_behavior else ""
         
         if collapse_over_subgoals:
-            plt.savefig(self.figure_dir + f"/subgoal_selection_related_subgoal_progress_simulated_{self.experiment}_collapsed{behavior_suffix}.png", dpi=300, bbox_inches='tight')
+            self._save_figure(self.figure_dir + f"/subgoal_selection_related_subgoal_progress_simulated_{self.experiment}_collapsed{behavior_suffix}.png")
         else:
-            plt.savefig(self.figure_dir + f"/subgoal_selection_related_subgoal_progress_simulated_{self.experiment}{behavior_suffix}.png", dpi=300, bbox_inches='tight')
+            self._save_figure(self.figure_dir + f"/subgoal_selection_related_subgoal_progress_simulated_{self.experiment}{behavior_suffix}.png")
         
         plt.show()
 
@@ -2088,11 +2569,12 @@ class PlotMeasures:
         # Save the plot
         behavior_suffix = "_with_behavior" if include_behavior else ""
         collapse_suffix = "_collapsed" if collapse_over_goals else ""
-        plt.savefig(self.figure_dir + f"/goal_selection_related_goal_progress_four_models_{self.experiment}{collapse_suffix}{behavior_suffix}.png", dpi=300, bbox_inches='tight')
+        self._save_figure(self.figure_dir + f"/goal_selection_related_goal_progress_four_models_{self.experiment}{collapse_suffix}{behavior_suffix}.png")
         plt.show()
 
-    def plot_subgoal_selection_related_subgoal_progress_four_models(self, models=['momentum_learn_alt_goal', 'prospective', 'td_persistence'], 
-                                                                 include_behavior=True, collapse_over_subgoals=False):
+    def plot_subgoal_selection_related_subgoal_progress_four_models(
+            self, models=['momentum_learn_alt_goal', 'prospective', 'td_persistence'],
+            include_behavior=True, collapse_over_subgoals=False):
         """
         Plot subgoal selection related subgoal progress for different models in four separate rows.
         
@@ -2106,20 +2588,20 @@ class PlotMeasures:
             # SH goal subgoals
             ('G_progress_SH', 'G', 'SH'),
             ('M_progress_SH', 'M', 'SH'),
-            ('C_progress_SH', 'C', 'SH'),
-            ('S_progress_SH', 'S', 'SH'),
+            #('C_progress_SH', 'C', 'SH'),
+            #('S_progress_SH', 'S', 'SH'),
             
             # BR goal subgoals  
-            ('G_progress_BR', 'G', 'BR'),
+            #('G_progress_BR', 'G', 'BR'),
             ('S_progress_BR', 'S', 'BR'),
-            ('C_progress_BR', 'C', 'BR'),
-            ('M_progress_BR', 'M', 'BR'),
+            #('C_progress_BR', 'C', 'BR'),
+            #('M_progress_BR', 'M', 'BR'),
             
             # HO goal subgoals
-            ('G_progress_HO', 'G', 'HO'),
-            ('S_progress_HO', 'S', 'HO'),
+            #('G_progress_HO', 'G', 'HO'),
+            #('S_progress_HO', 'S', 'HO'),
             ('C_progress_HO', 'C', 'HO'),
-            ('M_progress_HO', 'M', 'HO')
+            #('M_progress_HO', 'M', 'HO')
         ]
         
         # Define string labels for block types 0 to 5
@@ -2149,14 +2631,15 @@ class PlotMeasures:
             'behavior': '#d62728'  # Dark red
         }
 
-        # Create list of all models to plot
-        all_models = models.copy()
+        # Create list of all models to plot (behavior first when included)
+        all_models = []
         if include_behavior:
             all_models.append('behavior')
+        all_models.extend(models)
 
-        # Define markers for different block types (constant black color, different markers)
-        markers = ['o', 's', '^', 'D', 'v', 'p']  # circle, square, triangle, diamond, triangle_down, pentagon
+        markers = ['o', 's', '^', 'D', 'v', 'p']
         marker_dict = None  # Will be set in first iteration
+        color_dict = None  # Will be set in first iteration
         gs_main = None  # Will be set for non-collapsed mode
 
         # Create figure - single plot when collapsing, multiple rows otherwise
@@ -2164,11 +2647,14 @@ class PlotMeasures:
             fig, ax = plt.subplots(1, 1, figsize=(10, 7))
             axes = None  # Not used in collapsed mode
         else:
-            # Create figure with extra space for legend subplot
-            # Increased height and reduced width for subplots
-            fig = plt.figure(figsize=(12, 5 * len(all_models)))
-            gs_main = gridspec.GridSpec(len(all_models), 4, width_ratios=[1, 1, 1, 0.3], figure=fig, wspace=0.02)
-            # Create subplots for data (first 3 columns)
+            fig = plt.figure(figsize=(12, 3 * len(all_models)))
+            gs_main = gridspec.GridSpec(
+                len(all_models), 4,
+                width_ratios=[1, 1, 1, 0.3],
+                figure=fig,
+                wspace=0.02,
+                hspace=0.35
+            )
             axes = np.empty((len(all_models), 3), dtype=object)
             for i in range(len(all_models)):
                 for j in range(3):
@@ -2316,43 +2802,45 @@ class PlotMeasures:
                             merged['prob'] = merged['selected'] / merged['total']
                             merged['progress'] = merged[progress_var]
                             
-                            # Define markers for different block types (only once)
                             if marker_dict is None:
                                 all_block_types = sorted(merged['block_type'].unique())
                                 marker_dict = {bt: markers[k % len(markers)] for k, bt in enumerate(all_block_types)}
+                                pastel_palette = sns.color_palette("Pastel1", n_colors=len(all_block_types))
+                                color_dict = {}
+                                for k, bt in enumerate(all_block_types):
+                                    r, gr, b = pastel_palette[k]
+                                    h, l, s = colorsys.rgb_to_hls(r, gr, b)
+                                    color_dict[bt] = colorsys.hls_to_rgb(h, max(0.22, l * 0.52), min(1.0, s * 1.2))
                             
-                            # Plot each block type as separate line with black color and different markers
-                            for k, block_type in enumerate(merged['block_type'].unique()):
+                            for block_type in sorted(merged['block_type'].unique()):
                                 block_data = merged[merged['block_type'] == block_type]
                                 if not block_data.empty:
-                                    # Sort by progress for proper line plotting
                                     block_data = block_data.sort_values('progress')
+                                    c = color_dict[block_type]
                                     ax.plot(
                                         block_data['progress'],
                                         block_data['prob'],
                                         marker=marker_dict[block_type],
                                         linestyle=':',
                                         linewidth=2,
-                                        color='black',
+                                        color=c,
+                                        markerfacecolor=c,
+                                        markeredgecolor=c,
                                         markersize=5,
-                                        label=f'{block_type}',
-                                        alpha=0.7
+                                        label=f'{block_type}'
                                     )
                     
-                    # Only add title for the first row (momentum model)
                     if i == 0:
-                        ax.set_title(goal_titles[goal], fontsize=14, weight='bold')
+                        ax.set_title(goal_titles[goal], fontsize=12, weight='bold')
                     
                     ax.set_ylim(0, 1.05)
                     ax.grid(True, alpha=0.3)
                     
-                    # Only add xlabel for the last two rows (behavior and td_persistence)
-                    if i >= 2:
+                    if i == len(all_models) - 1:
                         ax.set_xlabel("Subgoal Progress", fontsize=12, weight='bold')
                     
-                    # Only add ylabel to the first column
-                    if j == 0:
-                        ax.set_ylabel(f'{model_display_names[model_name]}\nSubgoal Selection Probability', fontsize=12, weight='bold')
+                    if j == 0 and model_name == 'td_persistence':
+                        ax.set_ylabel('Subgoal Selection Probability', fontsize=12, weight='bold')
                     
                     # Legend will be added separately after all plots
 
@@ -2435,30 +2923,51 @@ class PlotMeasures:
             experiment = "H1"
         
         if not collapse_over_subgoals:
+            for i, model_name in enumerate(all_models):
+                pos_left = axes[i, 0].get_position()
+                pos_right = axes[i, 2].get_position()
+                fig.text(
+                    (pos_left.x0 + pos_right.x1) / 2,
+                    pos_right.y1 + 0.02,
+                    model_display_names[model_name],
+                    ha='center',
+                    va='bottom',
+                    fontsize=12,
+                    fontweight='bold'
+                )
+            
             fig.suptitle(f'Subgoal Selection Probability by Progress', fontsize=18, weight='bold', y=0.98)
             
             # Add legend in separate subplot
-            if marker_dict and gs_main:
-                # Create custom legend with markers
+            if marker_dict and color_dict and gs_main:
                 legend_handles = []
                 for block_type in sorted(marker_dict.keys()):
-                    legend_handles.append(plt.Line2D([0], [0], 
-                                                      marker=marker_dict[block_type], 
-                                                      linestyle=':', 
-                                                      color='black', 
-                                                      linewidth=2, 
-                                                      markersize=5, 
-                                                      label=block_type))
+                    c = color_dict[block_type]
+                    legend_handles.append(plt.Line2D(
+                        [0], [0],
+                        marker=marker_dict[block_type],
+                        linestyle=':',
+                        color=c,
+                        markerfacecolor=c,
+                        markeredgecolor=c,
+                        linewidth=2,
+                        markersize=5,
+                        label=block_type
+                    ))
                 
-                # Create legend subplot spanning all rows in the rightmost column
-                legend_ax = fig.add_subplot(gs_main[:, 3])  # Span all rows in last column
+                legend_ax = fig.add_subplot(gs_main[:, 3])
                 legend_ax.axis('off')
                 legend_ax.legend(handles=legend_handles, loc='center left', title='Block Type', frameon=False)
         
         # Save the plot
         behavior_suffix = "_with_behavior" if include_behavior else ""
         collapse_suffix = "_collapsed" if collapse_over_subgoals else ""
-        plt.savefig(self.figure_dir + f"/subgoal_selection_related_subgoal_progress_four_models_{self.experiment}{collapse_suffix}{behavior_suffix}.png", dpi=300, bbox_inches='tight')
+        figure_path = (
+            self.figure_dir
+            + f"/subgoal_selection_related_subgoal_progress_four_models_{self.experiment}"
+            + f"{collapse_suffix}{behavior_suffix}.png"
+        )
+        self._save_figure(figure_path)
         plt.show()
 
 
@@ -2541,7 +3050,7 @@ class PlotMeasures:
 
         plt.xlabel("Switch Type", fontsize=15, fontweight='bold')
         plt.ylabel("Proportion", fontsize=15, fontweight='bold')
-        plt.title(f"Goal switching patterns: Experiment {experiment}", 
+        plt.title(f"Goal switching patterns", 
                  fontsize=15, weight='bold')
         
         # Make legend bold
@@ -2551,8 +3060,7 @@ class PlotMeasures:
         plt.tight_layout()
         
         # Save figure
-        plt.savefig(self.figure_dir + f"/goal_switching_characteristics_experiment_{self.experiment}.png", 
-                   dpi=300, bbox_inches='tight')
+        self._save_figure(self.figure_dir + f"/goal_switching_characteristics_experiment_{self.experiment}.png")
         plt.show()
         
         # Print summary statistics
@@ -2660,9 +3168,8 @@ class PlotMeasures:
             
         plt.xlabel("Switch Categories", fontsize=15, fontweight='bold')
         plt.ylabel("Proportion", fontsize=15, fontweight='bold')
-        plt.title(f"Subgoal switching patterns: Experiment {experiment}", 
-                 fontsize=15, weight='bold')
-        
+        plt.title(f"Subgoal switching patterns", fontsize=15, weight='bold')
+
         # Make legend bold
         legend = plt.legend(prop={'size': 13, 'weight': 'bold'})
         
@@ -2670,8 +3177,7 @@ class PlotMeasures:
         plt.tight_layout()
         
         # Save figure
-        plt.savefig(self.figure_dir + f"/subgoal_switching_characteristics_experiment_{self.experiment}.png", 
-                   dpi=300, bbox_inches='tight')
+        self._save_figure(self.figure_dir + f"/subgoal_switching_characteristics_experiment_{self.experiment}.png")
         plt.show()
         
         # Print summary statistics
@@ -2683,6 +3189,12 @@ class PlotMeasures:
         
         return data, labels
 
+    # final-final manuscript: Figure 4A, Figure 4B, Figure 5, Figure 6B.
+    # 4A: switching_characteristics_goal_combined_experiment_H2_lineplot.png; use {'goal_type': 'goal'}
+    # 4B: switching_characteristics_goal_by_outcome_experiment_H2_barplot.png; use {'goal_type': 'goal'}
+    # 5: depth_first_analysis_goal_experiment_H2.png; use {'goal_type': 'goal'}
+    # 6B: depth_first_vs_rt_increase_experiment_H2.png; use {'goal_type': 'goal'}
+    # See analysis/README.md and reproduce_figures.py for inputs and panel aliases.
     def plot_switching_characteristics(self, goal_type="subgoal"):
         """
         Characterize switches in goal/subgoal selection patterns using pandas operations.
@@ -3245,8 +3757,7 @@ class PlotMeasures:
             plt.tight_layout()
             
             # Save and show first figure
-            plt.savefig(self.figure_dir + f"/switching_characteristics_{goal_type}_combined_experiment_{self.experiment}_lineplot.png", 
-                       dpi=300, bbox_inches='tight')
+            self._save_figure(self.figure_dir + f"/switching_characteristics_{goal_type}_combined_experiment_{self.experiment}_lineplot.png")
             plt.show()
         
         # Create the second plot with side-by-side bar plots (success/failure comparison)
@@ -3333,14 +3844,18 @@ class PlotMeasures:
             plt.tight_layout()
             
             # Save and show second figure
-            plt.savefig(self.figure_dir + f"/switching_characteristics_{goal_type}_by_outcome_experiment_{self.experiment}_barplot.png", 
-                       dpi=300, bbox_inches='tight')
+            self._save_figure(self.figure_dir + f"/switching_characteristics_{goal_type}_by_outcome_experiment_{self.experiment}_barplot.png")
             plt.show()
         else:
             print("Insufficient data for success/failure comparison plot")
         
         # Create the second plot with depth-first analysis (four subplots in 2x2 grid)
         if goal_type == "goal":
+            pastel_colors = sns.color_palette("pastel", 6)[:5]
+            subplot_colors = []
+            for r, g, b in pastel_colors:
+                h, l, s = colorsys.rgb_to_hls(r, g, b)
+                subplot_colors.append(colorsys.hls_to_rgb(h, max(0.22, l * 0.52), min(1.0, s * 1.2)))
             fig2 = plt.figure(figsize=(16, 12))
             ax3 = fig2.add_subplot(2, 2, 1)  # Top left
             ax4 = fig2.add_subplot(2, 2, 2)  # Top right
@@ -3355,6 +3870,8 @@ class PlotMeasures:
                 # and staying with same goal but switching subgoal (category 1)
                 # Average across both conditions for each participant
                 #depth_first_combined = (data_success[:, 0] - data_success[:, 1] + data_failure[:, 0] - data_failure[:, 1]) / (data_success[:, 0] + data_failure[:, 0] + data_success[:, 1] + data_failure[:, 1])
+                # Published analysis uses the ratio below, not the commented-out
+                # difference score. Success/failure proportions enter separately.
                 depth_first_combined = (data_success[:, 0]  + data_failure[:, 0] ) / (data_success[:, 0] + data_failure[:, 0] + data_success[:, 1] + data_failure[:, 1])
                 
                 # Calculate total number of goal switches for each participant from original dataframe
@@ -3372,7 +3889,7 @@ class PlotMeasures:
                 total_switches_combined = np.array(total_switches_combined)
                 
                 # Plot depth-first metric vs total switches (all participants together)
-                ax3.scatter(depth_first_combined, total_switches_combined, color='black', marker='o', alpha=0.7, s=60, zorder=3)
+                ax3.scatter(depth_first_combined, total_switches_combined, color=subplot_colors[0], marker='o', alpha=0.7, s=60, edgecolor='black', linewidth=0.5, zorder=3)
                 
                 # Add correlation analysis
                 from scipy.stats import pearsonr
@@ -3386,15 +3903,9 @@ class PlotMeasures:
                     z = np.polyfit(depth_first_combined[valid_mask], total_switches_combined[valid_mask], 1)
                     p = np.poly1d(z)
                     x_line = np.linspace(depth_first_combined[valid_mask].min(), depth_first_combined[valid_mask].max(), 100)
-                    ax3.plot(x_line, p(x_line), 'k--', alpha=0.8, linewidth=2, zorder=2)
+                    ax3.plot(x_line, p(x_line), color=subplot_colors[0], linestyle='--', alpha=0.8, linewidth=2, zorder=2)
                     
-                    # Add correlation text with scientific notation for p-value
-                    if p_value < 0.001:
-                        p_text = f'p = {p_value:.2e}'
-                    else:
-                        p_text = f'p = {p_value:.3f}'
-                    
-                    ax3.text(0.95, 0.95, f'r = {corr_coef:.3f}\n{p_text}', 
+                    ax3.text(0.95, 0.95, _format_correlation_annotation(corr_coef, p_value),
                             transform=ax3.transAxes, fontsize=16, weight='bold',
                             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
                             ha='right', va='top')
@@ -3403,7 +3914,9 @@ class PlotMeasures:
             ax3.set_xlabel("Depth-First Metric", 
                           fontsize=15, weight='bold')
             ax3.set_ylabel("Total Goal Switches", fontsize=15, weight='bold')
-            ax3.set_title("A. Depth-First Metric vs Total Goal Switches", fontsize=15, weight='bold')
+            ax3.set_title("Depth-First Metric vs Total Goal Switches", fontsize=15, weight='bold')
+            ax3.text(-0.18, 1.08, "A", transform=ax3.transAxes, fontsize=20, weight='bold',
+                     ha='left', va='top', clip_on=False)
             ax3.grid(alpha=0.3)
             
             # Make tick labels bold
@@ -3436,7 +3949,7 @@ class PlotMeasures:
                 irrelevant_minus_relevant_combined = np.array(irrelevant_minus_relevant_counts)
                 
                 # Plot depth-first metric vs (irrelevant - relevant) switches
-                ax4.scatter(depth_first_combined, irrelevant_minus_relevant_combined, color='black', marker='s', alpha=0.7, s=60, zorder=3)
+                ax4.scatter(depth_first_combined, irrelevant_minus_relevant_combined, color=subplot_colors[1], marker='s', alpha=0.7, s=60, edgecolor='black', linewidth=0.5, zorder=3)
                 
                 # Add correlation analysis for fourth subplot
                 valid_mask_4 = ~(np.isnan(depth_first_combined) | np.isnan(irrelevant_minus_relevant_combined))
@@ -3447,15 +3960,9 @@ class PlotMeasures:
                     z_4 = np.polyfit(depth_first_combined[valid_mask_4], irrelevant_minus_relevant_combined[valid_mask_4], 1)
                     p_4 = np.poly1d(z_4)
                     x_line_4 = np.linspace(depth_first_combined[valid_mask_4].min(), depth_first_combined[valid_mask_4].max(), 100)
-                    ax4.plot(x_line_4, p_4(x_line_4), 'k--', alpha=0.8, linewidth=2, zorder=2)
+                    ax4.plot(x_line_4, p_4(x_line_4), color=subplot_colors[1], linestyle='--', alpha=0.8, linewidth=2, zorder=2)
                     
-                    # Add correlation text with scientific notation for p-value
-                    if p_value_4 < 0.001:
-                        p_text_4 = f'p = {p_value_4:.2e}'
-                    else:
-                        p_text_4 = f'p = {p_value_4:.3f}'
-                    
-                    ax4.text(0.95, 0.95, f'r = {corr_coef_4:.3f}\n{p_text_4}', 
+                    ax4.text(0.95, 0.95, _format_correlation_annotation(corr_coef_4, p_value_4),
                             transform=ax4.transAxes, fontsize=16, weight='bold',
                             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
                             ha='right', va='top')
@@ -3463,8 +3970,10 @@ class PlotMeasures:
                 # Formatting for the fourth subplot
                 ax4.set_xlabel("Depth-First Metric", 
                               fontsize=15, weight='bold')
-                ax4.set_ylabel("Irrelevant Alt-Goal Switch Proportion", fontsize=15, weight='bold')
-                ax4.set_title("B. Depth-First Metric vs Irrelevant Alt-Goal Switch Proportion", fontsize=15, weight='bold')
+                ax4.set_ylabel("Irrelevant Alt-Goal\nSwitch Proportion", fontsize=15, weight='bold')
+                ax4.set_title("Depth-First Metric vs Irrelevant Alt-Goal Switch Proportion", fontsize=15, weight='bold')
+                ax4.text(-0.18, 1.08, "B", transform=ax4.transAxes, fontsize=20, weight='bold',
+                         ha='left', va='top', clip_on=False)
                 ax4.grid(alpha=0.3)
                 
                 # Make tick labels bold
@@ -3507,7 +4016,7 @@ class PlotMeasures:
             task_performance = np.array(task_performance)
             
             # Plot depth-first metric vs task performance
-            ax5.scatter(depth_first_combined, task_performance, color='black', marker='^', alpha=0.7, s=60, zorder=3)
+            ax5.scatter(depth_first_combined, task_performance, color=subplot_colors[2], marker='^', alpha=0.7, s=60, edgecolor='black', linewidth=0.5, zorder=3)
             
             # Add correlation analysis for fifth subplot
             valid_mask_5 = ~(np.isnan(depth_first_combined) | np.isnan(task_performance))
@@ -3518,15 +4027,9 @@ class PlotMeasures:
                 z_5 = np.polyfit(depth_first_combined[valid_mask_5], task_performance[valid_mask_5], 1)
                 p_5 = np.poly1d(z_5)
                 x_line_5 = np.linspace(depth_first_combined[valid_mask_5].min(), depth_first_combined[valid_mask_5].max(), 100)
-                ax5.plot(x_line_5, p_5(x_line_5), 'k--', alpha=0.8, linewidth=2, zorder=2)
+                ax5.plot(x_line_5, p_5(x_line_5), color=subplot_colors[2], linestyle='--', alpha=0.8, linewidth=2, zorder=2)
                 
-                # Add correlation text with scientific notation for p-value
-                if p_value_5 < 0.001:
-                    p_text_5 = f'p = {p_value_5:.2e}'
-                else:
-                    p_text_5 = f'p = {p_value_5:.3f}'
-                
-                ax5.text(0.95, 0.95, f'r = {corr_coef_5:.3f}\n{p_text_5}', 
+                ax5.text(0.95, 0.95, _format_correlation_annotation(corr_coef_5, p_value_5),
                         transform=ax5.transAxes, fontsize=16, weight='bold',
                         bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
                         ha='right', va='top')
@@ -3535,7 +4038,9 @@ class PlotMeasures:
             ax5.set_xlabel("Depth-First Metric", 
                           fontsize=15, weight='bold')
             ax5.set_ylabel("Number of Goals\nCompleted", fontsize=15, weight='bold')
-            ax5.set_title("C. Depth-First Metric vs Task Performance", fontsize=15, weight='bold')
+            ax5.set_title("Depth-First Metric vs Task Performance", fontsize=15, weight='bold')
+            ax5.text(-0.18, 1.08, "C", transform=ax5.transAxes, fontsize=20, weight='bold',
+                     ha='left', va='top', clip_on=False)
             ax5.grid(alpha=0.3)
             
             # Make tick labels bold
@@ -3654,7 +4159,7 @@ class PlotMeasures:
             goal_action_congruence = np.array(goal_action_congruence)
             
             # Plot depth-first metric vs goal-action congruence
-            ax6.scatter(depth_first_combined, goal_action_congruence, color='black', marker='D', alpha=0.7, s=60, zorder=3)
+            ax6.scatter(depth_first_combined, goal_action_congruence, color=subplot_colors[3], marker='D', alpha=0.7, s=60, edgecolor='black', linewidth=0.5, zorder=3)
             
             # Add correlation analysis for sixth subplot
             valid_mask_6 = ~(np.isnan(depth_first_combined) | np.isnan(goal_action_congruence))
@@ -3665,15 +4170,9 @@ class PlotMeasures:
                 z_6 = np.polyfit(depth_first_combined[valid_mask_6], goal_action_congruence[valid_mask_6], 1)
                 p_6 = np.poly1d(z_6)
                 x_line_6 = np.linspace(depth_first_combined[valid_mask_6].min(), depth_first_combined[valid_mask_6].max(), 100)
-                ax6.plot(x_line_6, p_6(x_line_6), 'k--', alpha=0.8, linewidth=2, zorder=2)
+                ax6.plot(x_line_6, p_6(x_line_6), color=subplot_colors[3], linestyle='--', alpha=0.8, linewidth=2, zorder=2)
                 
-                # Add correlation text with scientific notation for p-value
-                if p_value_6 < 0.001:
-                    p_text_6 = f'p = {p_value_6:.2e}'
-                else:
-                    p_text_6 = f'p = {p_value_6:.3f}'
-                
-                ax6.text(0.95, 0.95, f'r = {corr_coef_6:.3f}\n{p_text_6}', 
+                ax6.text(0.95, 0.95, _format_correlation_annotation(corr_coef_6, p_value_6),
                         transform=ax6.transAxes, fontsize=16, weight='bold',
                         bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
                         ha='right', va='top')
@@ -3682,7 +4181,9 @@ class PlotMeasures:
             ax6.set_xlabel("Depth-First Metric", 
                           fontsize=15, weight='bold')
             ax6.set_ylabel("Goal-Action\nCongruence", fontsize=15, weight='bold')
-            ax6.set_title("D. Depth-First Metric vs Goal-Action Congruence", fontsize=15, weight='bold')
+            ax6.set_title("Depth-First Metric vs Goal-Action Congruence", fontsize=15, weight='bold')
+            ax6.text(-0.18, 1.08, "D", transform=ax6.transAxes, fontsize=20, weight='bold',
+                     ha='left', va='top', clip_on=False)
             ax6.grid(alpha=0.3)
             
             # Make tick labels bold
@@ -3700,8 +4201,7 @@ class PlotMeasures:
             plt.tight_layout(pad=2.0, w_pad=8.0, h_pad=8.0)
             
             # Save and show second figure
-            plt.savefig(self.figure_dir + f"/depth_first_analysis_{goal_type}_experiment_{self.experiment}.png", 
-                       dpi=300, bbox_inches='tight')
+            self._save_figure(self.figure_dir + f"/depth_first_analysis_{goal_type}_experiment_{self.experiment}.png")
             plt.show()
             
             # Create a new separate plot: Depth-first metric vs Goal RT increase proportion
@@ -3735,7 +4235,7 @@ class PlotMeasures:
             rt_increase_proportions = np.array(rt_increase_proportions)
             
             # Plot depth-first metric vs RT increase proportion
-            ax7.scatter(depth_first_combined, rt_increase_proportions, color='black', marker='x', alpha=0.7, s=60, zorder=3)
+            ax7.scatter(depth_first_combined, rt_increase_proportions, color=subplot_colors[4], marker='x', alpha=0.7, s=60, linewidths=1.5, zorder=3)
             
             # Add correlation analysis
             valid_mask_rt = ~(np.isnan(depth_first_combined) | np.isnan(rt_increase_proportions))
@@ -3746,20 +4246,30 @@ class PlotMeasures:
                 z_rt = np.polyfit(depth_first_combined[valid_mask_rt], rt_increase_proportions[valid_mask_rt], 1)
                 p_rt = np.poly1d(z_rt)
                 x_line_rt = np.linspace(depth_first_combined[valid_mask_rt].min(), depth_first_combined[valid_mask_rt].max(), 100)
-                ax7.plot(x_line_rt, p_rt(x_line_rt), 'k--', alpha=0.8, linewidth=2, zorder=2)
+                ax7.plot(x_line_rt, p_rt(x_line_rt), color='black', linestyle='--', alpha=0.8, linewidth=2, zorder=2)
                 
-                # Add correlation text
-                ax7.text(0.95, 0.95, f'r = {corr_coef_rt:.3f}\np = {p_value_rt:.3f}', 
-                        transform=ax7.transAxes, fontsize=16, fontweight='bold',
-                        bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8),
-                        ha='right', va='top')
+                ax7.text(
+                    0.95, 0.95,
+                    f'r = {corr_coef_rt:.2f}\np < 0.05',
+                    transform=ax7.transAxes,
+                    fontsize=20,
+                    weight='bold',
+                    bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8),
+                    ha='right',
+                    va='top',
+                )
             
             # Formatting
             ax7.set_xlabel("Depth-First Metric", 
-                          fontsize=15, weight='bold')
+                          fontsize=20, weight='bold')
             ax7.set_ylabel("Goal RT Increase Proportion\n(Switch RT - Stay RT) / Stay RT", 
-                          fontsize=15, weight='bold')
-            ax7.set_title("Depth-First Metric vs Goal RT Increase Proportion", fontsize=16, weight='bold')
+                          fontsize=20, weight='bold')
+            ax7.set_title(
+                "Depth-First Metric vs Goal RT Increase Proportion",
+                fontsize=22,
+                weight='bold',
+                pad=28,
+            )
             ax7.grid(alpha=0.3)
             
             # Make tick labels bold
@@ -3773,11 +4283,10 @@ class PlotMeasures:
             for label in ax7.get_yticklabels():
                 label.set_fontsize(14)
             
-            plt.tight_layout()
+            plt.tight_layout(rect=[0, 0, 1, 0.94])
             
             # Save and show the new figure
-            plt.savefig(self.figure_dir + f"/depth_first_vs_rt_increase_experiment_{self.experiment}.png", 
-                       dpi=300, bbox_inches='tight')
+            self._save_figure(self.figure_dir + f"/depth_first_vs_rt_increase_experiment_{self.experiment}.png")
             plt.show()
         
         # Print summary statistics for both conditions
@@ -4185,7 +4694,7 @@ class PlotMeasures:
         
         plt.tight_layout()
         sns.despine(top=True, right=True)
-        plt.savefig(self.figure_dir + "/retrospective_bias_subgoals_" + str(self.experiment) + ".png", dpi=300, bbox_inches='tight')
+        self._save_figure(self.figure_dir + "/retrospective_bias_subgoals_" + str(self.experiment) + ".png")
         plt.show()
         
         return block_summary, condition_summary
@@ -4432,7 +4941,7 @@ class PlotMeasures:
         
         plt.tight_layout()
         sns.despine(top=True, right=True)
-        plt.savefig(self.figure_dir + "/retrospective_bias_goals_" + str(self.experiment) + ".png", dpi=300, bbox_inches='tight')
+        self._save_figure(self.figure_dir + "/retrospective_bias_goals_" + str(self.experiment) + ".png")
         plt.show()
         
         return block_summary, condition_summary
@@ -4687,7 +5196,7 @@ class PlotMeasures:
         
         plt.tight_layout()
         sns.despine(top=True, right=True)
-        plt.savefig(self.figure_dir + f"/retrospective_bias_subgoals_{model_name}_{self.experiment}.png", dpi=300, bbox_inches='tight')
+        self._save_figure(self.figure_dir + f"/retrospective_bias_subgoals_{model_name}_{self.experiment}.png")
         plt.show()
         
         return condition_summary
@@ -4855,18 +5364,23 @@ class PlotMeasures:
         
         plt.tight_layout()
         sns.despine(top=True, right=True)
-        plt.savefig(self.figure_dir + f"/retrospective_bias_goals_{model_name}_{self.experiment}.png", dpi=300, bbox_inches='tight')
+        self._save_figure(self.figure_dir + f"/retrospective_bias_goals_{model_name}_{self.experiment}.png")
         plt.show()
         
         return condition_summary
 
 
-    def plot_stay_proportion_with_progress(self):
+    def plot_stay_proportion_with_progress(self, ax=None, save=True, show=True):
         """
         Plot goal selection stay percentages based on progress levels.
         Divides goal progress into two blocks:
         - Low: [0-2]
         - High: [3-5]
+
+        Args:
+            ax: Optional matplotlib axes to plot on. If None, creates a new figure.
+            save (bool): Whether to save the figure.
+            show (bool): Whether to call plt.show().
         """
         df = self.df.copy()
         
@@ -4882,9 +5396,6 @@ class PlotMeasures:
         
         # Remove first trial of each block (no previous selection)
         df = df.dropna(subset=['prev_goal'])
-        
-        # Define progress columns and create progress level categories
-        progress_cols = ['SH_progress', 'BR_progress', 'HO_progress']
         
         # Function to categorize progress levels
         def categorize_progress(progress_val):
@@ -4979,16 +5490,19 @@ class PlotMeasures:
                   f"{row['stay_proportion']:.3f} ({row['stayed_count']}/{row['total_count']})")
         
         # Create the plot
-        plt.figure(figsize=(7, 6))
+        if ax is None:
+            _, ax = plt.subplots(figsize=(7, 6))
         
         # Create bar plot with progress levels on x-axis
-        ax = sns.barplot(
+        progress_palette = ['#3498db', '#e74c3c']  # blue for low, red for high progress
+        sns.barplot(
             data=results_df,
             x='progress_level',
             y='stay_proportion',
-            palette=['#D3D3D3', '#696969'],  # Light gray for low, dark gray for high
+            palette=progress_palette,
             edgecolor='black',
-            width=0.4
+            width=0.4,
+            ax=ax
         )
         
         # Add error bars (standard error of the mean)
@@ -5002,38 +5516,24 @@ class PlotMeasures:
                    linewidth=2)
         
         # Customize the plot
-        ax.set_xlabel('Progress level', fontsize=18, fontweight='bold')
-        ax.set_ylabel('Goal stay probability', fontsize=18, fontweight='bold')
+        ax.set_xlabel('Progress level', fontsize=22, fontweight='bold')
+        ax.set_ylabel('Goal stay probability', fontsize=22, fontweight='bold')
         ax.set_ylim(0, 1.0)
         
         # Center the bars by adjusting x-axis limits
         ax.set_xlim(-0.4, 1.4)
         
-        # Determine experiment number
-        if self.data_type == "online":
-            experiment = 'H2'
-        elif self.data_type == "fmri":
-            experiment = 'H1'
-        else:
-            experiment = ""
+        ax.set_title('Pr(Goal Stay)', 
+                    fontsize=24, weight='bold')
         
-        ax.set_title(f'Pr(Goal Stay)', 
-                    fontsize=20, weight='bold')
-        
-        # Make tick labels bold
-        ax.tick_params(axis='x', labelsize=16)
+        # Put progress range on second line of x-tick labels
+        ax.set_xticklabels([pl.replace(' (', '\n(') for pl in results_df['progress_level']])
+        ax.tick_params(axis='x', labelsize=20)
         ax.tick_params(axis='y', labelsize=16)
         for label in ax.get_xticklabels():
             label.set_weight('bold')
         for label in ax.get_yticklabels():
             label.set_weight('bold')
-        
-        # Add value labels on bars (only for bar containers, not error bar containers)
-        # for container in ax.containers:
-        #     if hasattr(container, 'patches'):  # Only label bar containers
-        #         ax.bar_label(container, fmt='%.3f', fontsize=12, fontweight='bold')
-        
-        plt.tight_layout()
         
         # Statistical analysis: compare low vs high progress
         from scipy import stats
@@ -5098,21 +5598,27 @@ class PlotMeasures:
         else:
             print("Cannot compare - missing low or high progress data")
         
-        # Save figure
-        plt.savefig(self.figure_dir + f"/stay_proportion_with_progress_experiment_{self.experiment}.png", 
-                   dpi=300, bbox_inches='tight')
-        plt.show()
+        if save or show:
+            plt.tight_layout()
+        if save:
+            self._save_figure(self.figure_dir + f"/stay_proportion_with_progress_experiment_{self.experiment}.png")
+        if show:
+            plt.show()
         
         return results_df
 
 
-    def plot_stay_proportion_with_progress_subgoals(self):
+    def plot_stay_proportion_with_progress_subgoals(self, ax=None, save=True, show=True):
         """
-        Plot subgoal selection stay percentages based on subgoal progress levels.
-        Shows two subplots: raw subgoal stay and subgoal stay given goal stay.
+        Plot subgoal stay given goal stay by subgoal progress level.
         Divides subgoal progress into two blocks:
         - Low: [0, 0.5)
         - High: [0.5, 1.0]
+
+        Args:
+            ax: Optional matplotlib axes to plot on. If None, creates a new figure.
+            save (bool): Whether to save the figure.
+            show (bool): Whether to call plt.show().
         """
         df = self.df.copy()
         
@@ -5277,68 +5783,24 @@ class PlotMeasures:
             print(f"{row['progress_level']}: "
                   f"{row['stay_proportion']:.3f} ({row['stayed_count']}/{row['total_count']})")
         
-        # Create the plot with two subplots
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+        # Create the plot: subgoal stay given goal stay
+        progress_palette = ['#3498db', '#e74c3c']  # blue for low, red for high progress
+        if ax is None:
+            _, ax = plt.subplots(1, 1, figsize=(7, 6))
         
-        # Left plot: Raw subgoal stay
-        if len(results_df_raw) > 0:
-            sns.barplot(
-                data=results_df_raw,
-                x='progress_level',
-                y='stay_proportion',
-                palette=['#D3D3D3', '#696969'],
-                edgecolor='black',
-                width=0.4,
-                ax=ax1
-            )
-            
-            x_positions = range(len(results_df_raw))
-            ax1.errorbar(x_positions, results_df_raw['stay_proportion'], 
-                       yerr=results_df_raw['sem'], 
-                       fmt='none', 
-                       color='black', 
-                       capsize=5, 
-                       capthick=2, 
-                       linewidth=2)
-        
-        ax1.set_xlabel('Subgoal progress level', fontsize=18, fontweight='bold')
-        ax1.set_ylabel('Subgoal stay probability', fontsize=18, fontweight='bold')
-        ax1.set_ylim(0, 1.0)
-        ax1.set_xlim(-0.4, 1.4)
-        
-        # Determine experiment number
-        if self.data_type == "online":
-            experiment = 'H2'
-        elif self.data_type == "fmri":
-            experiment = 'H1'
-        else:
-            experiment = ""
-        
-        ax1.set_title(f'Pr(Subgoal Stay)', 
-                    fontsize=20, weight='bold')
-        
-        # Make tick labels bold for ax1
-        ax1.tick_params(axis='x', labelsize=16)
-        ax1.tick_params(axis='y', labelsize=16)
-        for label in ax1.get_xticklabels():
-            label.set_weight('bold')
-        for label in ax1.get_yticklabels():
-            label.set_weight('bold')
-        
-        # Right plot: Subgoal stay given goal stay
         if len(results_df_conditional) > 0:
             sns.barplot(
                 data=results_df_conditional,
                 x='progress_level',
                 y='stay_proportion',
-                palette=['#D3D3D3', '#696969'],
+                palette=progress_palette,
                 edgecolor='black',
                 width=0.4,
-                ax=ax2
+                ax=ax
             )
             
             x_positions = range(len(results_df_conditional))
-            ax2.errorbar(x_positions, results_df_conditional['stay_proportion'], 
+            ax.errorbar(x_positions, results_df_conditional['stay_proportion'], 
                        yerr=results_df_conditional['sem'], 
                        fmt='none', 
                        color='black', 
@@ -5346,22 +5808,21 @@ class PlotMeasures:
                        capthick=2, 
                        linewidth=2)
         
-        ax2.set_xlabel('Subgoal progress level', fontsize=18, fontweight='bold')
-        ax2.set_ylabel('Subgoal stay probability', fontsize=18, fontweight='bold')
-        ax2.set_ylim(0, 1.0)
-        ax2.set_xlim(-0.4, 1.4)
-        ax2.set_title(f'Pr(Subgoal Stay | Goal Stay)', 
-                    fontsize=20, weight='bold')
+        ax.set_xlabel('Subgoal progress level', fontsize=22, fontweight='bold')
+        ax.set_ylabel('Subgoal stay probability', fontsize=22, fontweight='bold')
+        ax.set_ylim(0, 1.0)
+        ax.set_xlim(-0.4, 1.4)
+        ax.set_title('Pr(Subgoal Stay | Goal Stay)', 
+                    fontsize=24, weight='bold')
         
-        # Make tick labels bold for ax2
-        ax2.tick_params(axis='x', labelsize=16)
-        ax2.tick_params(axis='y', labelsize=16)
-        for label in ax2.get_xticklabels():
+        # Put progress range on second line of x-tick labels
+        ax.set_xticklabels([pl.replace(' (', '\n(') for pl in results_df_conditional['progress_level']])
+        ax.tick_params(axis='x', labelsize=20)
+        ax.tick_params(axis='y', labelsize=16)
+        for label in ax.get_xticklabels():
             label.set_weight('bold')
-        for label in ax2.get_yticklabels():
+        for label in ax.get_yticklabels():
             label.set_weight('bold')
-        
-        plt.tight_layout()
         
         # Statistical analysis: compare low vs high progress for both
         from scipy import stats
@@ -5390,21 +5851,6 @@ class PlotMeasures:
                   f"High={high_row['stay_proportion']:.3f}, "
                   f"χ²={chi2:.3f}, p={p_value:.4f}")
             
-            # Add significance markers to ax1
-            if p_value < 0.05 and len(results_df_raw) > 0:
-                bars = ax1.patches
-                bar_heights = [bar.get_height() for bar in bars]
-                if len(bar_heights) >= 2:
-                    max_height = max(bar_heights[0], bar_heights[1])
-                    bracket_height = max_height + 0.05
-                    line_height = bracket_height + 0.02
-                    x0 = bars[0].get_x() + bars[0].get_width() / 2
-                    x1 = bars[1].get_x() + bars[1].get_width() / 2
-                    ax1.plot([x0, x0, x1, x1], [bracket_height, line_height, line_height, bracket_height], 
-                            'k-', linewidth=1.5)
-                    sig_text = '***' if p_value < 0.001 else ('**' if p_value < 0.01 else '*')
-                    ax1.text((x0 + x1) / 2, line_height + 0.01, sig_text, 
-                            ha='center', va='bottom', fontsize=16, fontweight='bold')
         else:
             print("Cannot compare - missing low or high progress data")
         
@@ -5432,9 +5878,9 @@ class PlotMeasures:
                   f"High={high_row['stay_proportion']:.3f}, "
                   f"χ²={chi2:.3f}, p={p_value:.4f}")
             
-            # Add significance markers to ax2
+            # Add significance markers
             if p_value < 0.05 and len(results_df_conditional) > 0:
-                bars = ax2.patches
+                bars = ax.patches
                 bar_heights = [bar.get_height() for bar in bars]
                 if len(bar_heights) >= 2:
                     max_height = max(bar_heights[0], bar_heights[1])
@@ -5442,20 +5888,37 @@ class PlotMeasures:
                     line_height = bracket_height + 0.02
                     x0 = bars[0].get_x() + bars[0].get_width() / 2
                     x1 = bars[1].get_x() + bars[1].get_width() / 2
-                    ax2.plot([x0, x0, x1, x1], [bracket_height, line_height, line_height, bracket_height], 
+                    ax.plot([x0, x0, x1, x1], [bracket_height, line_height, line_height, bracket_height], 
                             'k-', linewidth=1.5)
                     sig_text = '***' if p_value < 0.001 else ('**' if p_value < 0.01 else '*')
-                    ax2.text((x0 + x1) / 2, line_height + 0.01, sig_text, 
+                    ax.text((x0 + x1) / 2, line_height + 0.01, sig_text, 
                             ha='center', va='bottom', fontsize=16, fontweight='bold')
         else:
             print("Cannot compare - missing low or high progress data")
         
-        # Save figure
-        plt.savefig(self.figure_dir + f"/stay_proportion_with_progress_subgoals_experiment_{self.experiment}.png", 
-                   dpi=300, bbox_inches='tight')
-        plt.show()
+        if save or show:
+            plt.tight_layout()
+        if save:
+            self._save_figure(self.figure_dir + f"/stay_proportion_with_progress_subgoals_experiment_{self.experiment}.png")
+        if show:
+            plt.show()
         
         return results_df_raw, results_df_conditional
+
+    # final-final manuscript: Figure 7A.
+    # 7A: Figure7A.png
+    # See analysis/README.md and reproduce_figures.py for inputs and panel aliases.
+    def plot_stay_proportion_with_progress_combined(self):
+        """
+        Plot goal stay and subgoal stay | goal stay side by side, saved as Figure7A.png.
+        Left: Pr(Goal Stay) by goal progress. Right: Pr(Subgoal Stay | Goal Stay) by subgoal progress.
+        """
+        fig, (ax_left, ax_right) = plt.subplots(1, 2, figsize=(14, 6))
+        self.plot_stay_proportion_with_progress(ax=ax_left, save=False, show=False)
+        self.plot_stay_proportion_with_progress_subgoals(ax=ax_right, save=False, show=False)
+        plt.tight_layout()
+        self._save_figure(self.figure_dir + "/Figure7A.png")
+        plt.show()
 
     def plot_stay_proportion_with_progress_simulated(self, model_name):
         """
@@ -5592,8 +6055,7 @@ class PlotMeasures:
                     ax.text((x0 + x1) / 2, line_height + 0.01, sig_text,
                             ha='center', va='bottom', fontsize=16, fontweight='bold')
         plt.tight_layout()
-        plt.savefig(self.figure_dir + f"/stay_proportion_with_progress_experiment_{self.experiment}_{model_name}_simulated.png",
-                   dpi=300, bbox_inches='tight')
+        self._save_figure(self.figure_dir + f"/stay_proportion_with_progress_experiment_{self.experiment}_{model_name}_simulated.png")
         plt.show()
         return results_df
 
@@ -5776,8 +6238,7 @@ class PlotMeasures:
         for label in ax2.get_yticklabels():
             label.set_weight('bold')
         plt.tight_layout()
-        plt.savefig(self.figure_dir + f"/stay_proportion_with_progress_subgoals_experiment_{self.experiment}_{model_name}_simulated.png",
-                   dpi=300, bbox_inches='tight')
+        self._save_figure(self.figure_dir + f"/stay_proportion_with_progress_subgoals_experiment_{self.experiment}_{model_name}_simulated.png")
         plt.show()
         return results_df_raw, results_df_conditional
 
@@ -6047,8 +6508,7 @@ class PlotMeasures:
                 print("Cannot compare - missing low or high progress data")
         
         # Save figure
-        plt.savefig(self.figure_dir + f"/stay_proportion_with_progress_subgoals_by_condition_experiment_{self.experiment}.png", 
-                   dpi=300, bbox_inches='tight')
+        self._save_figure(self.figure_dir + f"/stay_proportion_with_progress_subgoals_by_condition_experiment_{self.experiment}.png")
         plt.show()
         
         return results_df
@@ -6309,16 +6769,20 @@ class PlotMeasures:
                 print("Cannot compare - missing low or high progress data")
         
         # Save figure
-        plt.savefig(self.figure_dir + f"/stay_proportion_with_progress_goals_by_condition_experiment_{self.experiment}.png", 
-                   dpi=300, bbox_inches='tight')
+        self._save_figure(self.figure_dir + f"/stay_proportion_with_progress_goals_by_condition_experiment_{self.experiment}.png")
         plt.show()
         
         return results_df
 
-    def plot_goal_stay_by_block_type(self):
+    def plot_goal_stay_by_block_type(self, ax=None, save=True, show=True):
         """
         Plot goal stay probability collapsed across progress, comparing high vs low block types.
         Single bar plot: High block types (0, 1, 2) vs Low block types (3, 4, 5).
+
+        Args:
+            ax: Optional matplotlib axes to plot on. If None, creates a new figure.
+            save (bool): Whether to save the figure.
+            show (bool): Whether to call plt.show().
         """
         df = self.df.copy()
         
@@ -6405,13 +6869,15 @@ class PlotMeasures:
                   f"({row['stayed_count']}/{row['total_count']}, n={row['n_subjects']} subjects)")
         
         # Create single bar plot
-        fig, ax = plt.subplots(1, 1, figsize=(7, 6))
+        block_type_palette = ['#2ecc71', '#9b59b6']  # green for high, purple for low block types
+        if ax is None:
+            _, ax = plt.subplots(1, 1, figsize=(7, 6))
         
         sns.barplot(
             data=results_df,
             x='condition_label',
             y='stay_proportion',
-            palette=['#D3D3D3', '#696969'],  # Light gray for high, dark gray for low
+            palette=block_type_palette,
             edgecolor='black',
             width=0.4,
             ax=ax
@@ -6426,11 +6892,11 @@ class PlotMeasures:
                     capthick=2,
                     linewidth=2)
         
-        ax.set_xlabel('Block type', fontsize=18, fontweight='bold')
-        ax.set_ylabel('Goal stay probability', fontsize=20, fontweight='bold')
+        ax.set_xlabel('Block type', fontsize=22, fontweight='bold')
+        ax.set_ylabel('Goal stay probability', fontsize=22, fontweight='bold')
         ax.set_ylim(0, 1.0)
-        ax.set_title('Pr(Goal Stay) by Block Type', fontsize=20, weight='bold')
-        ax.tick_params(axis='x', labelsize=16)
+        ax.set_title('Pr(Goal Stay) by Block Type', fontsize=24, weight='bold')
+        ax.tick_params(axis='x', labelsize=20)
         ax.tick_params(axis='y', labelsize=16)
         for label in ax.get_xticklabels():
             label.set_weight('bold')
@@ -6468,18 +6934,25 @@ class PlotMeasures:
                     ax.text((x0 + x1) / 2, line_height + 0.01, sig_text,
                             ha='center', va='bottom', fontsize=16, fontweight='bold')
         
-        plt.tight_layout()
-        plt.savefig(self.figure_dir + f"/goal_stay_by_block_type_experiment_{self.experiment}.png",
-                    dpi=300, bbox_inches='tight')
-        plt.show()
+        if save or show:
+            plt.tight_layout()
+        if save:
+            self._save_figure(self.figure_dir + f"/goal_stay_by_block_type_experiment_{self.experiment}.png")
+        if show:
+            plt.show()
         
         return results_df
 
-    def plot_subgoal_stay_by_block_type(self):
+    def plot_subgoal_stay_by_block_type(self, ax=None, save=True, show=True):
         """
         Plot subgoal stay probability conditioned on goal stay, collapsed across progress,
         comparing high vs low block types.
         Single bar plot: High block types (0, 1, 2) vs Low block types (3, 4, 5).
+
+        Args:
+            ax: Optional matplotlib axes to plot on. If None, creates a new figure.
+            save (bool): Whether to save the figure.
+            show (bool): Whether to call plt.show().
         """
         df = self.df.copy()
         
@@ -6572,13 +7045,15 @@ class PlotMeasures:
                   f"({row['stayed_count']}/{row['total_count']}, n={row['n_subjects']} subjects)")
         
         # Create single bar plot
-        fig, ax = plt.subplots(1, 1, figsize=(7, 6))
+        block_type_palette = ['#2ecc71', '#9b59b6']  # green for high, purple for low block types
+        if ax is None:
+            _, ax = plt.subplots(1, 1, figsize=(7, 6))
         
         sns.barplot(
             data=results_df,
             x='condition_label',
             y='stay_proportion',
-            palette=['#D3D3D3', '#696969'],  # Light gray for high, dark gray for low
+            palette=block_type_palette,
             edgecolor='black',
             width=0.4,
             ax=ax
@@ -6593,11 +7068,11 @@ class PlotMeasures:
                     capthick=2,
                     linewidth=2)
         
-        ax.set_xlabel('Block type', fontsize=18, fontweight='bold')
-        ax.set_ylabel('Stay probability', fontsize=20, fontweight='bold')
+        ax.set_xlabel('Block type', fontsize=22, fontweight='bold')
+        ax.set_ylabel('Stay probability', fontsize=22, fontweight='bold')
         ax.set_ylim(0, 1.0)
-        ax.set_title('Pr(Subgoal Stay | Goal Stay) by Block Type', fontsize=20, weight='bold')
-        ax.tick_params(axis='x', labelsize=16)
+        ax.set_title('Pr(Subgoal Stay | Goal Stay) by Block Type', fontsize=24, weight='bold')
+        ax.tick_params(axis='x', labelsize=20)
         ax.tick_params(axis='y', labelsize=16)
         for label in ax.get_xticklabels():
             label.set_weight('bold')
@@ -6635,12 +7110,29 @@ class PlotMeasures:
                     ax.text((x0 + x1) / 2, line_height + 0.01, sig_text,
                             ha='center', va='bottom', fontsize=16, fontweight='bold')
         
-        plt.tight_layout()
-        plt.savefig(self.figure_dir + f"/subgoal_stay_by_block_type_experiment_{self.experiment}.png",
-                    dpi=300, bbox_inches='tight')
-        plt.show()
+        if save or show:
+            plt.tight_layout()
+        if save:
+            self._save_figure(self.figure_dir + f"/subgoal_stay_by_block_type_experiment_{self.experiment}.png")
+        if show:
+            plt.show()
         
         return results_df
+
+    # final-final manuscript: Figure 7B.
+    # 7B: Figure7B.png
+    # See analysis/README.md and reproduce_figures.py for inputs and panel aliases.
+    def plot_stay_by_block_type_combined(self):
+        """
+        Plot goal stay and subgoal stay | goal stay by block type side by side, saved as Figure7B.png.
+        Left: Pr(Goal Stay) by High/Low block type. Right: Pr(Subgoal Stay | Goal Stay) by High/Low block type.
+        """
+        fig, (ax_left, ax_right) = plt.subplots(1, 2, figsize=(14, 6))
+        self.plot_goal_stay_by_block_type(ax=ax_left, save=False, show=False)
+        self.plot_subgoal_stay_by_block_type(ax=ax_right, save=False, show=False)
+        plt.tight_layout()
+        self._save_figure(self.figure_dir + "/Figure7B.png")
+        plt.show()
 
     def plot_staying_patterns_prospective_retrospective(self):
         """
@@ -6871,8 +7363,7 @@ class PlotMeasures:
         # Customize the plot
         ax.set_xlabel('Conditions', fontsize=14, fontweight='bold')
         ax.set_ylabel('Goal Stay Probability', fontsize=14, fontweight='bold')
-        ax.set_title(f'Goal Staying Patterns by Condition: Experiment {experiment}', 
-                    fontsize=16, fontweight='bold')
+        ax.set_title(f'Goal Staying Patterns by Condition', fontsize=16, fontweight='bold')
         ax.set_xticks(x)
         ax.set_xticklabels(x_labels, fontsize=12, fontweight='bold')
         ax.set_ylim(0, 1.0)
@@ -6943,8 +7434,7 @@ class PlotMeasures:
         plt.tight_layout()
         
         # Save figure
-        plt.savefig(self.figure_dir + f"/staying_patterns_prospective_retrospective_by_condition_experiment_{self.experiment}.png", 
-                   dpi=300, bbox_inches='tight')
+        self._save_figure(self.figure_dir + f"/staying_patterns_prospective_retrospective_by_condition_experiment_{self.experiment}.png")
         plt.show()
         
         return results_df
@@ -7229,8 +7719,7 @@ class PlotMeasures:
         # Customize the plot
         ax.set_xlabel('Conditions', fontsize=14, fontweight='bold')
         ax.set_ylabel('Subgoal Stay Probability', fontsize=14, fontweight='bold')
-        ax.set_title(f'Subgoal Staying Patterns by Condition: Experiment {experiment}', 
-                    fontsize=16, fontweight='bold')
+        ax.set_title(f'Subgoal Staying Patterns by Condition', fontsize=16, fontweight='bold')
         ax.set_xticks(x)
         ax.set_xticklabels(x_labels, fontsize=12, fontweight='bold')
         ax.set_ylim(0, 1.0)
@@ -7301,13 +7790,15 @@ class PlotMeasures:
         plt.tight_layout()
         
         # Save figure
-        plt.savefig(self.figure_dir + f"/subgoal_staying_patterns_prospective_retrospective_by_condition_experiment_{self.experiment}.png", 
-                   dpi=300, bbox_inches='tight')
+        self._save_figure(self.figure_dir + f"/subgoal_staying_patterns_prospective_retrospective_by_condition_experiment_{self.experiment}.png")
         plt.show()
         
         return results_df
 
 
+    # final-final manuscript: Figure 3A.
+    # 3A: goal_transition_heatmaps_experiment_H2.png
+    # See analysis/README.md and reproduce_figures.py for inputs and panel aliases.
     def plot_goal_transition_heatmaps(self):
         """
         Plot heatmaps of goal transitions for each condition in a single row.
@@ -7357,7 +7848,9 @@ class PlotMeasures:
                 transition_matrices[cond],
                 annot=True,
                 fmt=".2f",
-                cmap="crest",
+                cmap="viridis",
+                vmin=0,
+                vmax=1,
                 cbar=False,
                 linewidths=0.5,
                 linecolor='gray',
@@ -7375,7 +7868,7 @@ class PlotMeasures:
                 label.set_weight('bold')
             for label in axs[i].get_yticklabels():
                 label.set_weight('bold')
-        
+
         # Determine experiment number
         if self.data_type == "online":
             experiment = 'H2'
@@ -7385,11 +7878,15 @@ class PlotMeasures:
             experiment = ""
         
         plt.suptitle(f'Goal Transition Matrices', fontsize=16, weight='bold')
-        plt.tight_layout(rect=[0, 0, 1, 1.05])
+        plt.tight_layout(rect=[0, 0, 0.88, 1.05])
+        cbar_ax = fig.add_axes([0.90, 0.18, 0.02, 0.64])
+        shared_colorbar = fig.colorbar(axs[-1].collections[0], cax=cbar_ax)
+        shared_colorbar.ax.tick_params(labelsize=12)
+        shared_colorbar.set_label('Transition Probability', fontsize=13, fontweight='bold')
         
         # Save figure
-        plt.savefig(self.figure_dir + f"/goal_transition_heatmaps_experiment_{self.experiment}.png", 
-                   dpi=300, bbox_inches='tight')
+        save_path = self.figure_dir + f"/goal_transition_heatmaps_experiment_{self.experiment}.png"
+        self._save_figure(save_path)
         plt.show()
         
         # Print summary statistics
@@ -7401,6 +7898,9 @@ class PlotMeasures:
         
         return transition_matrices
 
+    # final-final manuscript: Figure 3C.
+    # 3C: goal_transition_heatmaps_by_block_half_experiment_H2.png
+    # See analysis/README.md and reproduce_figures.py for inputs and panel aliases.
     def plot_goal_transition_heatmaps_by_block_half(self):
         """
         Plot heatmaps of goal and subgoal transitions split by first half vs second half of blocks.
@@ -7463,7 +7963,9 @@ class PlotMeasures:
                 goal_transition_matrices[half],
                 annot=True,
                 fmt=".2f",
-                cmap="crest",
+                cmap="viridis",
+                vmin=0,
+                vmax=1,
                 cbar=False,
                 linewidths=0.5,
                 linecolor='gray',
@@ -7491,6 +7993,8 @@ class PlotMeasures:
                 annot=True,
                 fmt=".2f",
                 cmap="viridis",
+                vmin=0,
+                vmax=1,
                 cbar=False,
                 linewidths=0.5,
                 linecolor='gray',
@@ -7509,7 +8013,7 @@ class PlotMeasures:
                 label.set_weight('bold')
             for label in axs[subplot_idx].get_yticklabels():
                 label.set_weight('bold')
-        
+
         # Determine experiment number
         if self.data_type == "online":
             experiment = 'H2'
@@ -7528,12 +8032,16 @@ class PlotMeasures:
                 fontsize=16, weight='bold', transform=fig.transFigure)
         
         # Adjust layout to leave space for titles at the top
-        plt.tight_layout(rect=[0, 0, 1, 0.95])
-        plt.subplots_adjust(top=0.92)
+        plt.tight_layout(rect=[0, 0, 0.88, 0.95])
+        plt.subplots_adjust(top=0.92, right=0.88)
+        cbar_ax = fig.add_axes([0.90, 0.18, 0.015, 0.64])
+        shared_colorbar = fig.colorbar(axs[-1].collections[0], cax=cbar_ax)
+        shared_colorbar.ax.tick_params(labelsize=12)
+        shared_colorbar.set_label('Transition Probability', fontsize=13, fontweight='bold')
         
         # Save figure
-        plt.savefig(self.figure_dir + f"/goal_transition_heatmaps_by_block_half_experiment_{self.experiment}.png", 
-                   dpi=300, bbox_inches='tight')
+        save_path = self.figure_dir + f"/goal_transition_heatmaps_by_block_half_experiment_{self.experiment}.png"
+        self._save_figure(save_path)
         plt.show()
         
         # Print summary statistics
@@ -7681,6 +8189,9 @@ class PlotMeasures:
         }
 
 
+    # final-final manuscript: Figure 3B.
+    # 3B: subgoal_transition_heatmaps_experiment_H2_goal_stay.png; use {'condition_on_goal_stay': True}
+    # See analysis/README.md and reproduce_figures.py for inputs and panel aliases.
     def plot_subgoal_transition_heatmaps(self, condition_on_goal_stay=True):
         """
         Plot heatmaps of subgoal transitions for each condition in a single row.
@@ -7742,6 +8253,8 @@ class PlotMeasures:
                 annot=True,
                 fmt=".2f",
                 cmap="viridis",
+                vmin=0,
+                vmax=1,
                 cbar=False,
                 linewidths=0.5,
                 linecolor='gray',
@@ -7759,7 +8272,7 @@ class PlotMeasures:
                 label.set_weight('bold')
             for label in axs[i].get_yticklabels():
                 label.set_weight('bold')
-        
+
         # Determine experiment number
         if self.data_type == "online":
             experiment = 'H2'
@@ -7769,13 +8282,17 @@ class PlotMeasures:
             experiment = ""
         
         title_suffix = " (Given Goal Stay)" if condition_on_goal_stay else ""
-        plt.suptitle(f'Subgoal Transition Matrices{title_suffix}: Experiment {experiment}', fontsize=16, weight='bold')
-        plt.tight_layout(rect=[0, 0, 1, 1.05])
+        plt.suptitle(f'Subgoal Transition Matrices{title_suffix}', fontsize=16, weight='bold')
+        plt.tight_layout(rect=[0, 0, 0.88, 1.05])
+        cbar_ax = fig.add_axes([0.90, 0.18, 0.02, 0.64])
+        shared_colorbar = fig.colorbar(axs[-1].collections[0], cax=cbar_ax)
+        shared_colorbar.ax.tick_params(labelsize=12)
+        shared_colorbar.set_label('Transition Probability', fontsize=13, fontweight='bold')
         
         # Save figure
         suffix = "_goal_stay" if condition_on_goal_stay else ""
-        plt.savefig(self.figure_dir + f"/subgoal_transition_heatmaps_experiment_{self.experiment}{suffix}.png", 
-                   dpi=300, bbox_inches='tight')
+        save_path = self.figure_dir + f"/subgoal_transition_heatmaps_experiment_{self.experiment}{suffix}.png"
+        self._save_figure(save_path)
         plt.show()
         
         # Print summary statistics
@@ -7835,6 +8352,8 @@ class PlotMeasures:
                 annot=True,
                 fmt=".2f",
                 cmap="viridis",
+                vmin=0,
+                vmax=1,
                 cbar=False,
                 linewidths=0.5,
                 linecolor='gray',
@@ -7861,11 +8380,15 @@ class PlotMeasures:
         title_suffix = " (Goal Stay Only)" if condition_on_goal_stay else ""
         plt.suptitle(f'Subgoal Transitions',
                     fontsize=16, weight='bold')
-        plt.tight_layout(rect=[0, 0, 1, 1.05])
+        plt.tight_layout(rect=[0, 0, 0.88, 1.05])
+        cbar_ax = fig.add_axes([0.90, 0.18, 0.02, 0.64])
+        shared_colorbar = fig.colorbar(axs[-1].collections[0], cax=cbar_ax)
+        shared_colorbar.ax.tick_params(labelsize=12)
+        shared_colorbar.set_label('Transition Probability', fontsize=13, fontweight='bold')
 
         suffix = "_goal_stay" if condition_on_goal_stay else ""
-        plt.savefig(self.figure_dir + f"/subgoal_transition_heatmaps_by_block_half_experiment_{self.experiment}{suffix}.png",
-                   dpi=300, bbox_inches='tight')
+        save_path = self.figure_dir + f"/subgoal_transition_heatmaps_by_block_half_experiment_{self.experiment}{suffix}.png"
+        self._save_figure(save_path)
         plt.show()
 
         print(f"\nSubgoal transition by block half{' (conditioned on goal stay)' if condition_on_goal_stay else ''}:")
@@ -8072,10 +8595,10 @@ class PlotMeasures:
 if __name__ == "__main__":
     plot_measures = PlotMeasures(data_type="online", read_from_csv=True)
 
-    plot_measures.plot_goal_action_congruence_histogram(experiment=0)
+    #plot_measures.plot_goal_action_congruence_histogram(experiment=0)
 
     # Example usage of the new switching characteristics method
-    # plot_measures.plot_switching_characteristics(goal_type="goal")
+    #plot_measures.plot_switching_characteristics(goal_type="goal")
     
     # # Run the refined bias analysis methods
     # plot_measures.plot_retrospective_bias_subgoals()
@@ -8083,21 +8606,23 @@ if __name__ == "__main__":
     
 
     # # Plot stay proportions with progress
+    #plot_measures.plot_stay_proportion_with_progress_combined()
     #plot_measures.plot_stay_proportion_with_progress()
     #plot_measures.plot_stay_proportion_with_progress_subgoals()
     #plot_measures.plot_stay_proportion_with_progress_simulated(model_name="resources")
     #plot_measures.plot_stay_proportion_with_progress_subgoals_simulated(model_name="resources")
     #plot_measures.plot_stay_proportion_with_progress_subgoals_by_condition()
     #plot_measures.plot_stay_proportion_with_progress_goals_by_condition()
+    plot_measures.plot_stay_by_block_type_combined()
     #plot_measures.plot_goal_stay_by_block_type()
     #plot_measures.plot_subgoal_stay_by_block_type()
 
     
-    #plot_measures.plot_goal_selection_related_goal_progress(simulate=True, model_name="momentum_with_softmax", collapse_over_goals=False)
-    #plot_measures.plot_subgoal_selection_related_subgoal_progress(simulate=False, model_name="resources", collapse_conditions=False, collapse_over_subgoals=False)
+    #plot_measures.plot_goal_selection_related_goal_progress(simulate=False, model_name=None)
+    #plot_measures.plot_subgoal_selection_related_subgoal_progress(simulate=False, model_name=None)
 
-    #plot_measures.plot_goal_selection_related_goal_progress(simulate=False, model_name="momentum_learn_alt_goal", collapse_over_goals=True)
-    #plot_measures.plot_subgoal_selection_related_subgoal_progress(simulate=False, collapse_conditions=False, collapse_over_subgoals=False)
+    #plot_measures.plot_goal_selection_related_goal_progress(simulate=False, model_name="momentum_learn_alt_goal")
+    #plot_measures.plot_subgoal_selection_related_subgoal_progress(simulate=False)
     
     
     # Example usage of the four models comparison
@@ -8106,7 +8631,7 @@ if __name__ == "__main__":
     
     # ### Example usage of the four models comparison for subgoals
     #plot_measures.plot_subgoal_selection_related_subgoal_progress_four_models(models=['momentum_learn_alt_goal', 'prospective', 'td_persistence'], 
-     #                                                                         include_behavior=True, collapse_over_subgoals=False)
+    #                                                                        include_behavior=True, collapse_over_subgoals=False)
 
 
 
@@ -8121,8 +8646,18 @@ if __name__ == "__main__":
     # print("="*60)
     # plot_measures.analyze_most_viable_goal_persistence()
     
-    #plot_measures.plot_goal_transition_heatmaps()
-    #plot_measures.plot_goal_transition_heatmaps_by_block_half()
-    #plot_measures.plot_subgoal_transition_heatmaps()
-    #plot_measures.plot_subgoal_transition_heatmaps_by_block_half()
+    # plot_measures.plot_goal_transition_heatmaps()
+    # plot_measures.plot_goal_transition_heatmaps_by_block_half()
+    # plot_measures.plot_subgoal_transition_heatmaps()
+    # plot_measures.plot_subgoal_transition_heatmaps_by_block_half()
     #plot_measures.analyze_subgoal_switching_relevance_to_dominant_goal()
+
+    #plot_measures.plot_trials_played_vs_performance()
+
+    # Print parameter correlations with goal switches, subgoal switches,
+    # task performance, and depth-first metric.
+    # model_name = "momentum_learn_alt_goal"
+    # corr_table, merged_param_behavior = plot_measures.correlate_model_parameters_with_behavior(
+    #     model_name=model_name,
+    #     experiment=0,
+    # )

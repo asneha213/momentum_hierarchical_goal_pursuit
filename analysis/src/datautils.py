@@ -5,14 +5,16 @@ import platform
 import numpy as np
 print(platform.node())
 
-if platform.node() == 'Snehas-MacBook-Air-5.local':
+if platform.node().startswith('Mac'):
     FMRI_SUB_BEHAVIOR ='/Users/hypatia/Caltech/momentum_hierarchical_goal_pursuit/fmri/subject_data/'
     FMRI_BEHAVIOR = '/Users/hypatia/Caltech/momentum_hierarchical_goal_pursuit/analysis/'
     MODEL_RESULTS = '/Users/hypatia/Caltech/momentum_hierarchical_goal_pursuit/analysis/results/'
     MODEL_RESULTS_ONLINE = '/Users/hypatia/Caltech/momentum_hierarchical_goal_pursuit/analysis/results_online/'
     CACHE_DIR = "/Users/hypatia/Caltech/momentum_hierarchical_goal_pursuit/analysis/cache/"
     FIGURES = '/Users/hypatia/Caltech/momentum_hierarchical_goal_pursuit/analysis/figures/'
-    FIGURES_TOPICS = '/Users/hypatia/Caltech/momentum_hierarchical_goal_pursuit/paper/Goal-switching-TOPICS/Goal--subgoal-switching---ToPICS/figures/'
+    #FIGURES_TOPICS = '/Users/hypatia/Caltech/momentum_hierarchical_goal_pursuit/paper/Goal-switching-TOPICS/Goal--subgoal-switching---ToPICS/figures/'
+    #FIGURES_TOPICS = '/Users/hypatia/Caltech/momentum_hierarchical_goal_pursuit/paper/final/why_we_dive_deep/figures/'
+    FIGURES_TOPICS = '/Users/hypatia/Caltech/momentum_hierarchical_goal_pursuit/paper/Goal-switching-TOPICS/Goal--subgoal-switching---ToPICS/figures'
     ONLINE_DATA = '/Users/hypatia/Caltech/momentum_hierarchical_goal_pursuit/data/'
 
 else:
