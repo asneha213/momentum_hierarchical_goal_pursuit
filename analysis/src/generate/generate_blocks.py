@@ -1,3 +1,5 @@
+"""Generate task designs; run from this directory to write into its json/ folder."""
+
 import os
 import numpy as np
 import pandas as pd

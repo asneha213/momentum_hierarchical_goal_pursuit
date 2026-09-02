@@ -66,7 +66,6 @@ class ProspectiveExp(Model):
         for goal in ['SH', 'HO', 'BR']:
             qvals[goal] = self.calculate_goal_value(goal)
 
-        #print(qvals)
         return qvals
 
 
@@ -80,7 +79,6 @@ class ProspectiveExp(Model):
             count = 0
             count, goal_progress = self.finish_subgoal(goal, subgoal, goal_progress, count)
             qvals[subgoal] = 10 * (self.gamma_a ** (count - 1))
-        #print(self.goal_progress[goal], qvals)
         return qvals
         # for subgoal in goal_progress.keys():
         #     if goal_progress[subgoal][0] < goal_progress[subgoal][1]:

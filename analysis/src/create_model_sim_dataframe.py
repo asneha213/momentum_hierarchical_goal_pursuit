@@ -5,7 +5,6 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)) + "/../src/")
 
 from behavior_utils import *
 from datautils import *
-#from generate_blocks import get_block_type
 
 import pandas as pd
 import warnings

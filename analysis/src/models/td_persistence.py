@@ -55,6 +55,5 @@ class TDPersistence(Model):
             if goal_progress[subgoal][0] < goal_progress[subgoal][1]:
                 qvals[subgoal] = self.M[subgoal]
 
-        #print(self.goal_progress[goal], f"Qvals for goal {goal}: {qvals}")
         return qvals
 

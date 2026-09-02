@@ -1,3 +1,5 @@
+"""Shared task state and choice machinery inherited by the computational models."""
+
 from scipy.special import softmax
 
 import numpy as np
@@ -229,7 +231,6 @@ class Model:
         for i, token in enumerate(active_subgoals):
             subgoal_select_probs[token] = subgoal_probs[i]
 
-        #print("Subgoal selection probs for goal:", subgoal_select_probs, subgoal)
         return subgoal, subgoal_select_probs, q_vals
                 
 
@@ -282,7 +283,6 @@ class Model:
         # Choose goal, estimate goal stay probability, and update goal preservation
             goal_m, goal_select_probs, q_vals = self.choose_goal(self.beta_g, self.prev_goal)
             trial["goal_selected_model"] = goal_m
-            #print("Goal selection probs for goal:", goal_select_probs)
 
             goal_select_prob = goal_select_probs[goal_sub]
 
@@ -354,7 +354,6 @@ class Model:
                 # Choose subgoal, estimate subgoal stay probability, and update subgoal preservation
                 for goal_given in ['SH', 'BR', 'HO']:
                     subgoal_m, subgoal_select_probs, subgoal_values = self.choose_subgoal(goal_given)
-                    #print(goal_given, subgoal_select_probs, self.resources)
                     subgoal_select_prob_key += subgoal_select_probs[subgoal_key] * goal_select_probs_subgoal[goal_given]
                 subgoal_select_probs_dict[subgoal_key] = subgoal_select_prob_key
             subgoal_select_prob = subgoal_select_probs_dict[subgoal_sub]

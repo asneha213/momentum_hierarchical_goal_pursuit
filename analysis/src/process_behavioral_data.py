@@ -1,3 +1,5 @@
+"""Reconstruct inventory and goal progress from raw task records."""
+
 from datautils import *
 
 
@@ -6,10 +8,6 @@ class ProcessBehavioralData:
     def __init__(self, data):
         self.data = data
     
-    # def load_data(self):
-    #     data = get_subject_data_from_id(experiment=0, subject_id=self.subject_id, data_type="online")
-    #     return data
-
     def init_goal_progress(self):
 
         goal_progress = {
@@ -148,9 +146,6 @@ class ProcessBehavioralData:
                 prev_trial_goal_progress = trial_data['goal_progress_pre']
 
 
-                #print(trial_num, trial_data['goal_selected'], trial_data['resources_pre'], trial_data['resources_post'], trial_data['goal_progress_pre'], trial_data['goal_progress_post'], trial_data['goal_completion'], trial_data['goal_completed'])
-                #print(trial_num, trial_data['goal_selected'], trial_data['resources_pre'], trial_data['goal_progress_pre'], trial_data['goal_completion'], trial_data['goal_completed'])
-            #print("Goal Completion Trials:", goal_completion_trials)
         self.data['block_type_data'] = block_type_data
         self.data['block_counts'] = block_counts
 

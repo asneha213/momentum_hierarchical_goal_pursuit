@@ -1,3 +1,5 @@
+"""Reaction-time analyses of switching and repeated goal/subgoal choices."""
+
 from plot_measures import *
 from plot_measures import _format_correlation_annotation
 
@@ -1463,18 +1465,5 @@ class PlotRTMeasures(PlotMeasures):
 
 
 if __name__ == "__main__":
-    # Example usage
+    # For all manuscript panels, use reproduce_figures.py; this is a local example.
     plot_rt = PlotRTMeasures(data_type="online", read_from_csv=True)
-    #goal_results, subgoal_results = plot_rt.plot_goal_rt_by_switching_pattern()
-    
-    # New method: RT by switching pattern split by block half
-    #goal_results, subgoal_results = plot_rt.plot_goal_rt_by_switching_pattern_by_block_half()
-    
-    # New method: RT increase vs goal switches
-    #rt_metrics = plot_rt.plot_rt_increase_vs_goal_switches()
-    
-    # New method: Goal RT by repetition
-    #repetition_results = plot_rt.plot_goal_rt_by_repetition()
-    
-    # New method: Subgoal RT by repetition
-    #subgoal_repetition_results = plot_rt.plot_subgoal_rt_by_repetition()

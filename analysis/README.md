@@ -101,3 +101,7 @@ Repeat for all participants/models to rebuild comparisons. Each restart uses 100
 Optuna trials; fitting all models is expensive and has no fixed sampler seed.
 Rebuild the processed cache after changing momentum fits.
 
+
+Shared data/output paths resolve from the checkout. Task-generation code and its
+JSON designs live in `analysis/src/generate/`; run that generator from its own
+directory. Processed caches and saved fits are retained as reproduction inputs.

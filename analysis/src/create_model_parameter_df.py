@@ -1,3 +1,5 @@
+"""Replay fitted models on observed trials to construct momentum and cost predictors."""
+
 import os
 import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)) + "/../src/")
@@ -53,6 +55,7 @@ class ModelParameterDF:
         return model_fits['params']
 
     def create_df(self, simulate=False):
+        """Replay trials chronologically; simulate=True substitutes model choices."""
         model = get_model(self.model_name, self.model_params)
         model.reset_slots()
         model.reset_card_probs()
@@ -65,6 +68,7 @@ class ModelParameterDF:
         prev_outcome_onset_time = None
         for block_num in block_keys:
             block = blocks_data[str(block_num)]
+            # Resource probabilities are relearned at the start of each block.
             model.reset_card_probs()
 
             trial_list = [int(i.split("_")[1]) for i in block.keys() if "trial_" in i]

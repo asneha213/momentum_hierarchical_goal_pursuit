@@ -1,3 +1,5 @@
+"""Model-name dispatch and simulation helpers shared by fitting and analysis."""
+
 import os
 import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)) + "/../src/")

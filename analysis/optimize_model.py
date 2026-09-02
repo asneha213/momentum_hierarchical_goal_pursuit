@@ -421,5 +421,4 @@ if __name__ == "__main__":
     # model_name = "prospective"
     # optimizer = ModelOptimizer(experiment, model_name, data_type=data_type)
     # res = optimizer.get_model_optimal_params()
-    # print(res)
 

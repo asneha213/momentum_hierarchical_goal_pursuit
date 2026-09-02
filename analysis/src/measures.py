@@ -44,7 +44,6 @@ def get_aggregate_measure(experiment, measure_name, cache=False, data_type="fmri
     else:
         subject_ids = ACTIVE_SUBJECT_IDS_ONLINE
     for subject_id in subject_ids:
-        #print(subject_id)
         subject_measures = SubjectMeasure(subject_id=subject_id, experiment=experiment, model_res=None, data_type=data_type)
         measure = get_behavioral_measure(subject_measures, measure_name)
         print(subject_id, measure)
@@ -367,7 +366,6 @@ class SubjectMeasure:
                 # if action_rel == 0:
                 #     continue
 
-                #print(subgoal, prev_subgoal)
 
                 if subgoal != prev_subgoal:
                     char = get_consecutive_subgoal_relations()

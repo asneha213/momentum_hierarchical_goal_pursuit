@@ -70,7 +70,6 @@ class Resources(Model):
         for goal in ['SH', 'HO', 'BR']:
             qvals[goal] = self.calculate_goal_value(goal)
 
-        #print(qvals)
         return qvals
 
     def calculate_qvals_subgoals(self, goal):
@@ -80,7 +79,6 @@ class Resources(Model):
             if goal_progress[subgoal][0] < goal_progress[subgoal][1]:
                 qvals[subgoal] = self.M[subgoal]
 
-        #print(self.goal_progress[goal], f"Qvals for goal {goal}: {qvals}")
         return qvals
 
 

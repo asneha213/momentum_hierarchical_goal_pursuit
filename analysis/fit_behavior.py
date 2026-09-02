@@ -1,3 +1,5 @@
+"""Estimate participant parameters with repeated Optuna searches over choice likelihood."""
+
 import optuna
 import pickle
 
@@ -11,7 +13,6 @@ from src.run_model import get_model
 import sys
 import platform
 
-print(platform.node())
 
 
 def get_optuna_params(trial, model_name):
@@ -152,10 +153,8 @@ class BehaviorFits:
                 if "goal_selected" not in trial or "resource_selected" not in trial:
                     continue
                 trial_m, goal_complete, goal_select_prob, subgoal_select_prob= model.run_subject_action_trial(trial)
-                #print(goal_select_prob, subgoal_select_prob, trial['goal_selected'], trial['resource_selected'], trial['resources_pre'])
                 if goal_select_prob != -1:
                     loglikelihoods_goal.append(np.log(goal_select_prob))
-                    #print(goal_select_prob, np.log(goal_select_prob))
                 if subgoal_select_prob != -1:
                     loglikelihoods_subgoal.append(np.log(subgoal_select_prob))
                     
@@ -195,6 +194,7 @@ class BehaviorFits:
         return err
 
     def fit_optuna(self, trt=None):
+        """Keep the lowest negative log likelihood across independent 100-trial searches."""
         best_params = []
         best_vals = []
         self.trt = trt

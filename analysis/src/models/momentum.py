@@ -1,3 +1,5 @@
+"""Learn goal and subgoal values as linear functions of progress via TD updates."""
+
 from .model import Model
 import numpy as np
 
@@ -50,15 +52,14 @@ class Momentum(Model):
             progress_new = progress + 1.0/6
 
 
+        # TD error compares discounted next-progress value with current value.
         delta = self.gamma_g * self.goal_momentum(progress_new, self.w_g[goal], self.b_g[goal]) \
                 - self.goal_momentum(progress, self.w_g[goal], self.b_g[goal])
 
         self.w_g[goal] += self.alpha * delta * progress_new
         self.b_g[goal] += self.alpha * delta
-        #print(goal, flip, self.w_g[goal], self.b_g[goal])
 
         return delta
-        #print(goal, flip, self.w_g[goal], self.b_g[goal])
 
 
     def calculate_goal_value(self, goal):
@@ -71,7 +72,6 @@ class Momentum(Model):
         # calculate goal values
         for goal in ['SH', 'HO', 'BR']:
             qvals[goal] = self.calculate_goal_value(goal)
-        #print(qvals)
         return qvals
 
     ### Subgoal methods

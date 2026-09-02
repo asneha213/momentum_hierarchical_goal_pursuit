@@ -1,3 +1,5 @@
+"""Goal-choice and RT regressions using model-derived trial predictors."""
+
 from plot_measures import *
 
 import statsmodels.formula.api as smf
@@ -701,19 +703,15 @@ class PlotMeasuresMixedEffects(PlotMeasures):
 
 
 if __name__ == "__main__":
-    # Create all forest plots
-    
+    # For all manuscript panels, use reproduce_figures.py; this is a local example.
     print("\nCreating forest plot for experiment H2 only...")
-    #PlotMeasuresMixedEffects.plot_forest_plot_experiment_h2_only()
-    
+
     print("\nCreating forest plot for goal choice in experiment H2...")
-    #PlotMeasuresMixedEffects.plot_forest_plot_goal_choice_experiment_h2_only()
 
     print("\nCreating combined Figure 9A...")
     PlotMeasuresMixedEffects.plot_figure9a()
-    
+
     print("\nCreating forest plot for goal RT switch vs stay trials...")
     PlotMeasuresMixedEffects.plot_forest_plot_goal_rt_switch_vs_stay()
-    
-    print("\nAll plots completed!")
 
+    print("\nAll plots completed!")

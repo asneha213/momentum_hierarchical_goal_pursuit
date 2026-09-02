@@ -1,3 +1,5 @@
+"""Compare saved participant fits using AIC/BIC, without rerunning optimization."""
+
 import pickle
 import os
 
@@ -40,7 +42,6 @@ class ModelComparisons:
 
         details = get_experiment_trial_details(experiment=0)
         num_samples = details['num_samples']
-        #print("Model name:", model_name)
 
 
         if self.data_type == 'online':
@@ -51,9 +52,7 @@ class ModelComparisons:
             results_path = MODEL_RESULTS
 
         for subject_id in subject_ids:
-            #print("Processing subject:", subject_id)
             subject_path = results_path + model_name + "_" + str(self.experiment) + "/" + str(subject_id) + ".pkl"
-            #print(subject_id, model_name)
             try:
                 with open(subject_path, "rb") as f:
                     model_fits = pickle.load(f)
@@ -851,22 +850,7 @@ class ModelComparisons:
 
 
 if __name__ == "__main__":
-    # Example usage of the comprehensive model comparison
+    # For all manuscript panels, use reproduce_figures.py; this is a local example.
     model_comparisons = ModelComparisons(experiment=0, data_type='online', save_dict=False, likelihood_type='total')
-    
-    # Compare all 9 models across different likelihood types
-    #model_comparisons.plot_comprehensive_model_comparison()
-    
-    # Compare models by block half (first half vs second half)
-    #model_comparisons.plot_comprehensive_model_comparison_by_block_half()
-
 
     model_comparisons.plot_momentum_models_comparison()
-    
-    # Or compare just for total likelihood only
-    # aic_scores, bic_scores = model_comparisons.plot_all_models_comparison(likelihood_type='total')
-    
-    # Original comparison methods still available
-    # model_comparisons.plot_model_fits_experiment()
-    # model_comparisons.plot_model_fits_experiment_momentum()
-

@@ -66,7 +66,6 @@ class Prospective(Model):
         for goal in ['SH', 'HO', 'BR']:
             qvals[goal] = self.calculate_goal_value(goal)
 
-        #print(qvals)
         return qvals
 
 

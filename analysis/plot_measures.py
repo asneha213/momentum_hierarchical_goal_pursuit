@@ -1,3 +1,5 @@
+"""Behavioral selection and persistence analyses; panel mapping is in README.md."""
+
 import colorsys
 import os
 import sys
@@ -3368,7 +3370,6 @@ class PlotMeasures:
                     else:
                         return 1  # Staying with the goal and switching to a new subgoal
                 elif current_goal != prev_goal and current_subgoal == prev_subgoal:
-                    #print(current_goal, current_subgoal, prev_goal, prev_subgoal)
                     return -1  # Exclude: Staying with the subgoal, but switching the goal
                 elif current_goal != prev_goal and current_subgoal != prev_subgoal:
                     # Determine if this is a relevant or irrelevant goal switch
@@ -8593,71 +8594,7 @@ class PlotMeasures:
 
 
 if __name__ == "__main__":
+    # For all manuscript panels, use reproduce_figures.py; this is a local example.
     plot_measures = PlotMeasures(data_type="online", read_from_csv=True)
 
-    #plot_measures.plot_goal_action_congruence_histogram(experiment=0)
-
-    # Example usage of the new switching characteristics method
-    #plot_measures.plot_switching_characteristics(goal_type="goal")
-    
-    # # Run the refined bias analysis methods
-    # plot_measures.plot_retrospective_bias_subgoals()
-    # plot_measures.plot_retrospective_bias_goals()
-    
-
-    # # Plot stay proportions with progress
-    #plot_measures.plot_stay_proportion_with_progress_combined()
-    #plot_measures.plot_stay_proportion_with_progress()
-    #plot_measures.plot_stay_proportion_with_progress_subgoals()
-    #plot_measures.plot_stay_proportion_with_progress_simulated(model_name="resources")
-    #plot_measures.plot_stay_proportion_with_progress_subgoals_simulated(model_name="resources")
-    #plot_measures.plot_stay_proportion_with_progress_subgoals_by_condition()
-    #plot_measures.plot_stay_proportion_with_progress_goals_by_condition()
     plot_measures.plot_stay_by_block_type_combined()
-    #plot_measures.plot_goal_stay_by_block_type()
-    #plot_measures.plot_subgoal_stay_by_block_type()
-
-    
-    #plot_measures.plot_goal_selection_related_goal_progress(simulate=False, model_name=None)
-    #plot_measures.plot_subgoal_selection_related_subgoal_progress(simulate=False, model_name=None)
-
-    #plot_measures.plot_goal_selection_related_goal_progress(simulate=False, model_name="momentum_learn_alt_goal")
-    #plot_measures.plot_subgoal_selection_related_subgoal_progress(simulate=False)
-    
-    
-    # Example usage of the four models comparison
-    # plot_measures.plot_goal_selection_related_goal_progress_four_models(models=['momentum_learn_alt_goal', 'prospective', 'td_persistence'], 
-    #                                                                   include_behavior=True, collapse_over_goals=True)
-    
-    # ### Example usage of the four models comparison for subgoals
-    #plot_measures.plot_subgoal_selection_related_subgoal_progress_four_models(models=['momentum_learn_alt_goal', 'prospective', 'td_persistence'], 
-    #                                                                        include_behavior=True, collapse_over_subgoals=False)
-
-
-
-    #plot_measures.plot_goal_selection_per_block()
-    #plot_measures.plot_viable_goal_selection_high_low()
-    #plot_measures.plot_subgoal_selection_per_block()
-
-    
-    # Statistical analysis of most viable goal persistence
-    # print("\n" + "="*60)
-    # print("MOST VIABLE GOAL PERSISTENCE ANALYSIS")
-    # print("="*60)
-    # plot_measures.analyze_most_viable_goal_persistence()
-    
-    # plot_measures.plot_goal_transition_heatmaps()
-    # plot_measures.plot_goal_transition_heatmaps_by_block_half()
-    # plot_measures.plot_subgoal_transition_heatmaps()
-    # plot_measures.plot_subgoal_transition_heatmaps_by_block_half()
-    #plot_measures.analyze_subgoal_switching_relevance_to_dominant_goal()
-
-    #plot_measures.plot_trials_played_vs_performance()
-
-    # Print parameter correlations with goal switches, subgoal switches,
-    # task performance, and depth-first metric.
-    # model_name = "momentum_learn_alt_goal"
-    # corr_table, merged_param_behavior = plot_measures.correlate_model_parameters_with_behavior(
-    #     model_name=model_name,
-    #     experiment=0,
-    # )
