@@ -101,21 +101,3 @@ Repeat for all participants/models to rebuild comparisons. Each restart uses 100
 Optuna trials; fitting all models is expensive and has no fixed sampler seed.
 Rebuild the processed cache after changing momentum fits.
 
-## Interpretation and known issues
-
-- All 21 panels were generated with the supplied inputs and recorded environment.
-  This does not verify every manuscript statistic or exact historical rendering.
-- Keep Pingouin at 0.5.5; version 0.6 changes result-column names used by the code.
-- Figures 7C/D save successfully but catch an `np2` effect-size reporting error:
-  the ANOVA defaults to `ng2`. F and p are printed; effect-size reporting is incomplete.
-- Figure 8 can skip missing/unreadable fits. Check participant coverage in the logs.
-  Full-block AIC/BIC use `2*NLL + 2*k` and `2*NLL + k*log(360)`.
-- Figure 9A uses pooled logistic regression for choices and participant random
-  intercepts for RT. Figure 9B fits stay and switch trials separately.
-- Raw `BR` denotes observatory, displayed as `OB`. Preserve the functions' trial
-  filters and depth-first metric when comparing results.
-- Noninteractive `show()` warnings are expected; images are saved without a window.
-
-Keep the command, logs, input release, repository commit, and `pip freeze` output
-with your results. For implementation details, consult the mapped methods and
-`analysis/src/create_behavior_dataframe.py` / `create_model_parameter_df.py`.
